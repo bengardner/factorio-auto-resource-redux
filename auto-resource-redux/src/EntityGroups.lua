@@ -22,6 +22,8 @@ EntityGroups.entity_group_filters = {
   ["spidertron"] = { filter = "type", type = "spider-vehicle" },
   ["reactor"] = { filter = "type", type = "reactor" },
   ["arr-combinator"] = { filter = "name", name = "arr-combinator" },
+  ["entity-ghost"] = { filter = "type", type = "entity-ghost" },
+  ["tile-ghost"] = { filter = "type", type = "tile-ghost" },
 }
 
 function EntityGroups.calculate_groups()

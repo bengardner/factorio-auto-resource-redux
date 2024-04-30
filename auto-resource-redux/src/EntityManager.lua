@@ -32,12 +32,18 @@ local entity_queue_specs = {
   ["assembling-machine"] = { handler = EntityHandlers.handle_assembler, ticks_per_cycle = 120 },
   ["lab"] = { handler = EntityHandlers.handle_lab, ticks_per_cycle = 120 },
   ["arr-combinator"] = { handler = EntityHandlers.handle_storage_combinator, ticks_per_cycle = 12 },
+  ["entity-ghost"] = { handler = EntityHandlers.handle_entity_ghost, ticks_per_cycle = 120 },
+  ["tile-ghost"] = { handler = EntityHandlers.handle_tile_ghost, ticks_per_cycle = 120 },
 }
 
 local function handle_entity(entity, handler, cache_table)
   if not handler then
     local queue_key = EntityGroups.names_to_groups[entity.name]
     handler = entity_queue_specs[queue_key].handler
+    if not handler then
+      log(("handler nil for %s key=%s"):format(entity.name, queue_key))
+      return
+    end
   end
   local entity_data = global.entity_data[entity.unit_number] or {}
   local storage = Storage.get_storage(entity)
@@ -180,6 +186,9 @@ function EntityManager.on_entity_created(event)
   end
   local queue_key = manage_entity(entity, true)
   if queue_key == nil then
+    return
+  end
+  if not entity.valid then
     return
   end
 

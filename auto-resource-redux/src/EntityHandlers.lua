@@ -473,4 +473,80 @@ function EntityHandlers.handle_storage_combinator(o)
   return true
 end
 
+
+local function populate_ghost(o, is_entity)
+  local entity = o.entity
+  local ghost_prototype = entity.ghost_prototype
+  if ghost_prototype == nil then
+    return true
+  end
+
+  -- check to see if we have enough items in the network
+  local item_list = ghost_prototype.items_to_place_this
+  local missing = false
+  for _, ing in ipairs(item_list) do
+    local n_avail = Storage.get_available_item_count(o.storage, ing.name, ing.count, false)
+    if n_avail < ing.count then
+      missing = true
+    end
+  end
+  if missing then
+    -- waiting for items
+    return true
+  end
+
+  local surface = entity.surface
+  local bbox = entity.bounding_box
+  local _, revived_entity, __ = entity.revive{raise_revive = true}
+  if revived_entity ~= nil then
+    -- NOTE: entity is now invalid
+    for _, ing in ipairs(item_list) do
+      Storage.remove_item(o.storage, ing.name, ing.count, true)
+    end
+    return
+  end
+
+  -- had items, but failed to revive -- must be blocked! (entity is still valid)
+  local retval = true
+  if is_entity then
+    local ents = surface.find_entities_filtered({ area=bbox, to_be_deconstructed=true })
+    local to_mine = {}
+    for _, eee in ipairs(ents) do
+      if eee.prototype.mineable_properties.minable then
+        table.insert(to_mine, eee)
+      else
+        if eee.type == 'cliff' then
+          -- TODO: queue this cliff for destruction (?)
+          -- GlobalState.cliff_queue(eee)
+        else
+          -- TODO: queue this entity for destruction (?)
+          -- GlobalState.mine_queue(eee)
+        end
+      end
+    end
+
+    if #to_mine > 0 then
+      -- blow away those trees! will populate on next cycle
+      local inv = game.create_inventory(16)
+      for _, eee in ipairs(to_mine) do
+        eee.mine({ inventory=inv })
+        Storage.add_from_inventory(o.storage, inv, true)
+        retval = false
+      end
+      inv.destroy()
+    end
+  end
+
+  -- failed: likely blocked by a cliff, try again later
+  return retval
+end
+
+function EntityHandlers.handle_entity_ghost(o)
+  return populate_ghost(o, true)
+end
+
+function EntityHandlers.handle_tile_ghost(o)
+  return populate_ghost(o, false)
+end
+
 return EntityHandlers

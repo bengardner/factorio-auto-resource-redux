@@ -74,6 +74,9 @@ end
 
 function EntityCustomData.on_built(event)
   local entity = event.created_entity or event.entity
+  if entity == nil or not entity.valid then
+    return
+  end
   if entity.type == "entity-ghost" and entity.ghost_name == "arr-data-proxy" then
     local target_name = entity.tags._name
     local search_area = {
