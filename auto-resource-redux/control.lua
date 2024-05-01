@@ -1,5 +1,6 @@
 if script.active_mods["gvv"] then require("__gvv__.gvv")() end
 
+local Destroyer = require "src.Destroyer"
 local DomainStore = require "src.DomainStore";
 local EntityCustomData = require "src.EntityCustomData"
 local EntityGroups = require "src.EntityGroups";
@@ -33,6 +34,7 @@ local function initialise()
   LogisticManager.initialise()
   GUIResourceList.initialise()
   GUIEntityPanel.initialise()
+  Destroyer.initialise()
 end
 
 local function on_tick()
@@ -46,6 +48,7 @@ local function on_tick()
   GUIModButton.on_tick()
   GUIResourceList.on_tick()
   GUIEntityPanel.on_tick()
+  Destroyer.on_tick()
 end
 
 local function on_built(event)
@@ -85,6 +88,10 @@ script.on_event(defines.events.on_pre_player_mined_item, EntityManager.on_entity
 script.on_event(defines.events.on_robot_mined_entity, EntityManager.on_entity_removed)
 script.on_event(defines.events.script_raised_destroy, EntityManager.on_entity_removed)
 script.on_event(defines.events.on_entity_died, EntityManager.on_entity_died)
+script.on_event(defines.events.on_marked_for_deconstruction, EntityManager.on_marked_for_deconstruction)
+
+
+script.on_event(defines.events.on_marked_for_upgrade, EntityManager.on_marked_for_upgrade)
 
 -- custom
 remote.add_interface("auto-resource-redux", {

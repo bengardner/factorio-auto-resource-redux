@@ -56,6 +56,12 @@ function Storage.get_storage_for_surface(surface_id, entity)
   return storage
 end
 
+function Storage.get_storage_for_force(entity, force_name)
+  local storage = DomainStore.get_subdomain(DomainStore.get_domain_key_raw(entity.surface.index, force_name), "storage", default_storage)
+  storage.last_entity = entity
+  return storage
+end
+
 function Storage.initialise()
   for name, item in pairs(game.item_prototypes) do
     if (item.type == "armor" and item.equipment_grid) or item.type == "item-with-entity-data" then
@@ -196,11 +202,13 @@ function Storage.get_available_item_count(storage, storage_key, amount_requested
   local amount_stored = storage.items[storage_key] or 0
   local amount_reserved = storage.reservations[storage_key] or 0
   -- make sure reservation works by automatically marking up to a stack of the item as reserved
-  if use_reserved and storage.items[storage_key] and amount_reserved <= 0 and not storage.last_entity.is_player() then
-    local fluid_name = Storage.unpack_fluid_item_name(storage_key)
-    local prototype = game.item_prototypes[storage_key] or { stack_size = 1 }
-    amount_reserved = fluid_name and DEFAULT_FLUID_RESERVATION or math.min(amount_requested, prototype.stack_size)
-    Storage.set_item_limit_and_reservation(storage, storage_key, storage.last_entity, nil, amount_reserved)
+  if storage.last_entity ~= nil and storage.last_entity.valid then
+    if use_reserved and storage.items[storage_key] and amount_reserved <= 0 and not storage.last_entity.is_player() then
+      local fluid_name = Storage.unpack_fluid_item_name(storage_key)
+      local prototype = game.item_prototypes[storage_key] or { stack_size = 1 }
+      amount_reserved = fluid_name and DEFAULT_FLUID_RESERVATION or math.min(amount_requested, prototype.stack_size)
+      Storage.set_item_limit_and_reservation(storage, storage_key, storage.last_entity, nil, amount_reserved)
+    end
   end
   if use_reserved then
     return math.min(amount_requested, amount_stored), amount_stored

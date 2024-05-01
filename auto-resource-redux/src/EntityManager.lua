@@ -9,6 +9,7 @@ local LogisticManager = require "src.LogisticManager"
 local LoopBuffer = require "src.LoopBuffer"
 local Storage = require "src.Storage"
 local Util = require "src.Util"
+local Destroyer = require "src.Destroyer"
 
 local evaluate_condition = EntityCondition.evaluate
 
@@ -247,6 +248,26 @@ end
 
 function EntityManager.on_entity_deployed(data)
   manage_entity(data.entity, true)
+end
+
+function EntityManager.on_marked_for_deconstruction(event)
+  local entity = event.entity
+  if entity ~= nil and entity.valid and event.player_index ~= nil then
+    local player = game.players[event.player_index]
+    if player ~= nil then
+      Destroyer.queue_destruction(event.entity, player.force)
+    end
+  end
+end
+
+function EntityManager.on_marked_for_upgrade(event)
+  local entity = event.entity
+  if entity ~= nil and entity.valid and entity.unit_number ~= nil and event.player_index ~= nil then
+    local player = game.players[event.player_index]
+    if player ~= nil then
+      Destroyer.queue_upgrade(event.entity, player)
+    end
+  end
 end
 
 return EntityManager

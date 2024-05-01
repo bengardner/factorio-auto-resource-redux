@@ -11,6 +11,7 @@ local LogisticManager = require "src.LogisticManager"
 local Storage = require "src.Storage"
 local FluidBoxScan = require "src.FluidBoxScan"
 local Util = require "src.Util"
+local Destroyer = require "src.Destroyer"
 
 local function store_fluids(storage, entity, prod_type_pattern, ignore_limit)
   local remaining_fluids = {}
@@ -474,6 +475,9 @@ function EntityHandlers.handle_storage_combinator(o)
 end
 
 
+--[[
+Revive a ghost, pull stuff out of storage.
+]]
 local function populate_ghost(o, is_entity)
   local entity = o.entity
   local ghost_prototype = entity.ghost_prototype
@@ -495,8 +499,6 @@ local function populate_ghost(o, is_entity)
     return true
   end
 
-  local surface = entity.surface
-  local bbox = entity.bounding_box
   local _, revived_entity, __ = entity.revive{raise_revive = true}
   if revived_entity ~= nil then
     -- NOTE: entity is now invalid
@@ -506,39 +508,8 @@ local function populate_ghost(o, is_entity)
     return
   end
 
-  -- had items, but failed to revive -- must be blocked! (entity is still valid)
-  local retval = true
-  if is_entity then
-    local ents = surface.find_entities_filtered({ area=bbox, to_be_deconstructed=true })
-    local to_mine = {}
-    for _, eee in ipairs(ents) do
-      if eee.prototype.mineable_properties.minable then
-        table.insert(to_mine, eee)
-      else
-        if eee.type == 'cliff' then
-          -- TODO: queue this cliff for destruction (?)
-          -- GlobalState.cliff_queue(eee)
-        else
-          -- TODO: queue this entity for destruction (?)
-          -- GlobalState.mine_queue(eee)
-        end
-      end
-    end
-
-    if #to_mine > 0 then
-      -- blow away those trees! will populate on next cycle
-      local inv = game.create_inventory(16)
-      for _, eee in ipairs(to_mine) do
-        eee.mine({ inventory=inv })
-        Storage.add_from_inventory(o.storage, inv, true)
-        retval = false
-      end
-      inv.destroy()
-    end
-  end
-
-  -- failed: likely blocked by a cliff, try again later
-  return retval
+  -- failed: likely blocked, try again later
+  return true
 end
 
 function EntityHandlers.handle_entity_ghost(o)
