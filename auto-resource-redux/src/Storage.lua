@@ -1,5 +1,5 @@
 local Storage = {}
-local DomainStore = require "src.DomainStore";
+local DomainStore = require "src.DomainStore"
 local ItemPriorityManager = require "src.ItemPriorityManager"
 local R = require "src.RichText"
 local Util = require "src.Util"
