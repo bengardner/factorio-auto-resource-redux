@@ -31,20 +31,7 @@ end
 function DomainStore.initialise()
   if global.domains == nil then
     global.domains = {}
-  end
-end
-
-local function sort_storage(combined)
-  -- TODO: if combined, move everything to the 'surface 0' store
-  -- Can't be undone.
-end
-
-function DomainStore.on_runtime_mod_setting_changed(event)
-  local new_value = settings.global["auto-resource-redux-combine-surfaces"].value
-  local old_value = global.combine_surfaces or false
-  if old_value ~= new_value then
-    global.combine_surfaces = new_value
-    sort_storage(new_value)
+    global.combine_surfaces = settings.startup["auto-resource-redux-combine-surfaces"].value
   end
 end
 

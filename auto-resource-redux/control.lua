@@ -122,5 +122,3 @@ script.on_event(GUIDispatcher.ON_COPY_CONDITIONS_KEYPRESS, GUIDispatcher.on_even
 
 -- other
 script.on_event(defines.events.on_player_changed_surface, on_player_changed_surface)
-
-script.on_event(defines.events.on_runtime_mod_setting_changed, DomainStore.on_runtime_mod_setting_changed)
