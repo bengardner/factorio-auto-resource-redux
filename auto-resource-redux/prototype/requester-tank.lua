@@ -118,8 +118,8 @@ local requester_tank_recipe = {
   enabled = true,
   energy_required = 0.5,
   ingredients = {
-    { type = "item", name = "pipe",       amount = 10 },
-    { type = "item", name = "iron-plate", amount = 5 }
+    --{ type = "item", name = "pipe",       amount = 10 },
+    --{ type = "item", name = "iron-plate", amount = 5 }
   },
   name = "arr-requester-tank",
   result = "arr-requester-tank",

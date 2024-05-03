@@ -95,8 +95,8 @@ local sink_tank_recipe = {
   enabled = true,
   energy_required = 0.5,
   ingredients = {
-    { type = "item", name = "pipe", amount = 10 },
-    { type = "item", name = "iron-plate", amount = 5 }
+    --{ type = "item", name = "pipe", amount = 10 },
+    --{ type = "item", name = "iron-plate", amount = 5 }
   },
   name = "arr-sink-tank",
   result = "arr-sink-tank",
@@ -119,5 +119,3 @@ data:extend({
   sink_tank_recipe,
   sink_tank_item,
 })
-
-
