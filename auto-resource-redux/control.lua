@@ -16,6 +16,8 @@ local LogisticManager = require("src.LogisticManager")
 local Storage = require "src.Storage"
 local Util = require("src.Util")
 
+require "src.SelectedEntityInfo"
+
 local initialised = false
 
 local function initialise()
