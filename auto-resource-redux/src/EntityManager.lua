@@ -12,9 +12,13 @@ local Util = require "src.Util"
 local Destroyer = require "src.Destroyer"
 local DeadlineQueue = require "src.DeadlineQueue"
 
--- 10 seconds total
-local DEADLINE_QUEUE_TICKS = 10
-local DEADLINE_QUEUE_COUNT = 60
+-- NOTE: a wider slice wastes CPU, as we have to check if each entry has really expired.
+-- Maybe go with 4 and use next_coarse() to skip the checks? Can be optimized later.
+local DEADLINE_QUEUE_TICKS = 1
+local DEADLINE_QUEUE_COUNT = 200
+local SERVICE_PER_TICK_MIN = 20
+local SERVICE_PER_TICK_MAX = 80
+-- NOTE: 500*90*10 = 450,000 entities before perma-lag
 
 local evaluate_condition = EntityCondition.evaluate
 
@@ -35,12 +39,18 @@ local entity_queue_specs = {
   ["reactor"] = { handler = EntityHandlers.handle_reactor, ticks_per_cycle = 120 },
   ["mining-drill"] = { handler = EntityHandlers.handle_mining_drill, ticks_per_cycle = 120 },
   ["furnace"] = { handler = EntityHandlers.handle_furnace, ticks_per_cycle = 120 },
-  ["assembling-machine"] = { handler = EntityHandlers.handle_assembler, ticks_per_cycle = 120 },
+  ["assembling-machine"] = { handler = EntityHandlers.handle_assembler, ticks_per_cycle = 180 },
   ["lab"] = { handler = EntityHandlers.handle_lab, ticks_per_cycle = 120 },
   ["arr-combinator"] = { handler = EntityHandlers.handle_storage_combinator, ticks_per_cycle = 12 },
   ["entity-ghost"] = { handler = EntityHandlers.handle_entity_ghost, ticks_per_cycle = 120 },
   ["tile-ghost"] = { handler = EntityHandlers.handle_tile_ghost, ticks_per_cycle = 120 },
 }
+
+local function on_entity_removed(entity_id)
+  EntityCustomData.on_entity_removed(entity_id)
+  FurnaceRecipeManager.clear_marks(entity_id)
+  global.entities[entity_id] = nil
+end
 
 --[[
 Handle an entity.
@@ -62,9 +72,10 @@ local function handle_entity(entity, cache_table)
 
   local entity_data = global.entity_data[entity.unit_number] or {}
   local storage = Storage.get_storage(entity)
-  local running = not entity.to_be_deconstructed() and evaluate_condition(entity, entity_data.condition, storage)
+  local running = not entity.to_be_deconstructed() and entity_data.paused ~= true and evaluate_condition(entity, entity_data.condition, storage)
   local dt = handler({
     entity = entity,
+    data = entity_data,
     storage = storage,
     use_reserved = entity_data.use_reserved,
     paused = not running,
@@ -72,6 +83,11 @@ local function handle_entity(entity, cache_table)
     condition = entity_data.condition,
     cache = cache_table or {}
   })
+  local last_service_tick = entity_data._service_tick
+  if last_service_tick ~= nil then
+    entity_data._service_period = game.tick - last_service_tick
+  end
+  entity_data._service_tick = game.tick
   if type(dt) == "number" then
     return dt
   end
@@ -95,13 +111,16 @@ local function manage_entity(entity, immediately_handle)
     global.entity_data[entity.unit_number] = entity_data
   end
 
-  local dt = 0
+  local unit_number = entity.unit_number
+  local dt = entity_queue_specs[queue_key].ticks_per_cycle or DEFAULT_TICKS_PER_CYCLE
   if immediately_handle then
     dt = handle_entity(entity)
   end
   if dt >= 0 and entity.valid then
     DeadlineQueue.queue(global.deadline_queue, entity.unit_number, entity_data, game.tick + dt)
     entity_data._deadline_add = game.tick
+  else
+    on_entity_removed(unit_number)
   end
   return queue_key
 end
@@ -125,8 +144,6 @@ function EntityManager.reload_entities()
     end
   end
 
-  log(("Managing %s entities"):format(table_size(global.entities)))
-
   --[[
   log("Entity queue sizes:")
   for entity_type, queue in pairs(global.entity_queues) do
@@ -149,9 +166,11 @@ function EntityManager.initialise()
   if global.deadline_queue == nil then
     global.deadline_queue = DeadlineQueue.new(DEADLINE_QUEUE_COUNT, DEADLINE_QUEUE_TICKS)
     should_reload_entities = true
+  elseif #global.deadline_queue ~= DEADLINE_QUEUE_COUNT then
+    should_reload_entities = true
   end
   -- FIXME : temp hack
-  should_reload_entities = true
+  --should_reload_entities = true
 
   --[[
   for queue_key, _ in pairs(entity_queue_specs) do
@@ -162,14 +181,21 @@ function EntityManager.initialise()
   end
   ]]
 
+  local rm_cnt = 0
+  for unit_number, entity in pairs(global.entities) do
+    if not entity.valid then
+      on_entity_removed(unit_number)
+      rm_cnt = rm_cnt + 1
+    end
+  end
+  if rm_cnt > 0 then
+    print((" *** REMOVED %s INVALID ENTITIES"):format(rm_cnt))
+  end
+
   if should_reload_entities then
     EntityManager.reload_entities()
   end
-end
-
-local function on_entity_removed(entity_id)
-  EntityCustomData.on_entity_removed(entity_id)
-  FurnaceRecipeManager.clear_marks(entity_id)
+  log(("Managing %s entities"):format(table_size(global.entities)))
 end
 
 -------------------------------------------------------------------------------
@@ -232,18 +258,24 @@ end
 
 -------------------------------------------------------------------------------
 
+local phist = {}
 local tick_cnt = 0
 function EntityManager.on_tick()
   local now = game.tick
   local dlq = global.deadline_queue
-  local entities_per_tick = 20
+  local ept = global.entities_per_tick or 20
   local cache_table = {}
+  -- calculate the number of items to service on this tick. count/4 to smooth spikes.
+  local cur_q_cnt = DeadlineQueue.get_current_count(dlq)
+  local service_per_tick = math.max(SERVICE_PER_TICK_MIN, math.min(SERVICE_PER_TICK_MAX, cur_q_cnt / DEADLINE_QUEUE_TICKS))
 
   local pcnt = 0
 
-  for _ = 1, entities_per_tick do
-    local entity_id, entity_data = DeadlineQueue.next(dlq)
+  local hit_end = false
+  for _ = 1, ept do
+    local entity_id, _ = DeadlineQueue.next(dlq)
     if entity_id == nil then
+      hit_end = true
       break
     end
 
@@ -254,6 +286,7 @@ function EntityManager.on_tick()
     else
       local dt = handle_entity(entity, cache_table)
       if dt >= 0 then
+        local entity_data = global.entity_data[entity_id] or {}
         DeadlineQueue.queue(dlq, entity_id, entity_data, now + dt)
         entity_data._deadline_add = now
         pcnt = pcnt + 1
@@ -264,17 +297,29 @@ function EntityManager.on_tick()
     end
   end
 
+  if hit_end then
+    ept = ept - 1
+    if pcnt < SERVICE_PER_TICK_MIN then
+      ept = ept - 1
+    end
+  else
+    ept = ept + 1
+  end
 
-  tick_cnt = tick_cnt + 1
-  if tick_cnt % 60 == 0 then
+  global.entities_per_tick = math.max(SERVICE_PER_TICK_MIN, math.min(ept, SERVICE_PER_TICK_MAX))
+--[[
+  local log_idx = game.tick % 60
+  if log_idx == 0 then
     local qcnt = {}
     for idx, ents in ipairs(global.deadline_queue) do
       qcnt[idx] = table_size(ents)
     end
 
-    print(game.tick, pcnt, serpent.line(qcnt))
+    print(game.tick, global.entities_per_tick, serpent.line(qcnt))
+    print(serpent.line(phist))
   end
-
+  phist[log_idx+1] = pcnt
+]]
 end
 
 function EntityManager.on_entity_created(event)
@@ -292,6 +337,7 @@ function EntityManager.on_entity_created(event)
   if queue_key == nil then
     return
   end
+  -- manage_entity() may have destroyed this entity via revive() or mine()
   if not entity.valid then
     return
   end

@@ -171,6 +171,7 @@ function Destroyer.process_upgrade_queue()
         dir = entity.direction
       end
       local old_name = entity.name
+      local old_unum = entity.unit_number
 
       local new_ent = entity.surface.create_entity({
         name = upgrade_prot.name,
@@ -183,7 +184,8 @@ function Destroyer.process_upgrade_queue()
         raise_built = true,
         create_build_effect_smoke = true,
       })
-      if new_ent ~= nil then
+      if new_ent ~= nil then        
+        global.entities[old_unum] = nil
         Storage.remove_item(storage, upgrade_prot.name, 1, true)
         log(("Upgraded %s to %s @ %s"):format(old_name, new_ent.name, serpent.line(new_ent.position)))
       end

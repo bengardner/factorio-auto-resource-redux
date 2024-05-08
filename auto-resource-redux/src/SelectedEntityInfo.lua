@@ -1,6 +1,6 @@
 local EntityGroups = require 'src.EntityGroups'
 
-local super_debug = false
+local super_debug = true
 
 local function get_sprite_name(name)
   if game.item_prototypes[name] ~= nil then
@@ -9,6 +9,10 @@ local function get_sprite_name(name)
   if game.fluid_prototypes[name] ~= nil then
     return "fluid/" .. name
   end
+end
+
+local function ticks_to_text(ticks)
+  return string.format('%s ticks (%.1f seconds)', ticks, ticks / 60)
 end
 
 local function update_player_selected(player)
@@ -126,17 +130,27 @@ local function update_player_selected(player)
     }
     tt.add {
       type="label",
-      caption = string.format("%s ticks", info._deadline - game.tick),
+      caption = ticks_to_text(info._deadline - game.tick),
     }
     if info._deadline_add then
       local ticks = info._deadline - info._deadline_add
       tt.add {
         type="label",
-        caption = "[font=default-bold]Service Period[/font]",
+        caption = "[font=default-bold]Desired Period[/font]",
       }
       tt.add {
         type="label",
-        caption = string.format("%s ticks", ticks),
+        caption = ticks_to_text(ticks),
+      }
+    end
+    if info._service_period ~= nil then
+      tt.add {
+        type="label",
+        caption = "[font=default-bold]Last Period[/font]",
+      }
+      tt.add {
+        type="label",
+        caption = ticks_to_text(info._service_period),
       }
     end
   end

@@ -369,21 +369,52 @@ function EntityHandlers.handle_sink_chest(o, ignore_limit)
   return table_size(added_items) > 0
 end
 
+local sink_min_period = 60
+local sink_max_period = 10 * 60
+
 function EntityHandlers.handle_sink_tank(o)
   if o.paused then
-    return false
+    return sink_max_period -- paused
   end
-  local fluid = o.entity.fluidbox[1]
-  if fluid == nil then
-    return false
+
+  local fluidbox = o.entity.fluidbox
+  local fluid = fluidbox[1]
+
+  if fluid == nil or fluid.amount < 1 then
+    return sink_max_period -- tank is empty
   end
+
   local new_fluid, amount_added = Storage.add_fluid(o.storage, fluid)
   if amount_added > 0 then
+    -- stash leftovers
     o.entity.fluidbox[1] = new_fluid.amount > 0 and new_fluid or nil
-    return true
+
+    -- calculate the optimal service_period based on the amount delivered
+    local capacity = fluidbox.get_capacity(1)
+
+    local period = o.data.period or sink_min_period
+    if amount_added >= (0.95 * capacity) then
+      -- added over 95%, chop period in half
+      period = period / 2
+    elseif amount_added < (0.05 * capacity) then
+      -- added less than 5%, double period in half
+      period = period * 2
+    else
+      -- in the middle, so calculate the optimal period
+      local last_period = game.tick - (o.data._service_tick or 0)
+      period = math.floor(last_period * (capacity * 0.9) / amount_added)
+    end
+    period = math.max(sink_min_period, math.min(sink_max_period, period))
+    o.data.period = period
+    return period
   end
-  return false
+
+  -- not feeding the network, must be full
+  return sink_max_period
 end
+
+local tank_min_period = 60
+local tank_max_period = 10 * 60
 
 function EntityHandlers.handle_requester_tank(o)
   local data = global.entity_data[o.entity.unit_number]
@@ -391,12 +422,12 @@ function EntityHandlers.handle_requester_tank(o)
   if data == nil or not data.fluid then
     data = data or {}
     if not FluidBoxScan.autoconfig_request(o.entity, data) then
-      return false
+      return tank_max_period
     end
     global.entity_data[o.entity.unit_number] = data
   end
   if o.paused then
-    return false
+    return tank_max_period
   end
   local fluid = o.entity.fluidbox[1]
   if fluid and data.fluid and fluid.name ~= data.fluid then
@@ -413,7 +444,7 @@ function EntityHandlers.handle_requester_tank(o)
   local target_amount = math.floor(data.percent / 100 * capacity)
   local amount_needed = target_amount - fluid.amount
   if amount_needed <= 0 then
-    return false
+    return tank_max_period
   end
   local amount_removed, temperature = Storage.remove_fluid_in_temperature_range(
     o.storage,
@@ -423,13 +454,32 @@ function EntityHandlers.handle_requester_tank(o)
     amount_needed,
     o.use_reserved
   )
-  fluid.temperature = Util.weighted_average(fluid.temperature, fluid.amount, temperature, amount_removed)
-  fluid.amount = fluid.amount + amount_removed
-  if fluid.amount > 0 then
+  if amount_removed > 0 then
+    fluid.temperature = Util.weighted_average(fluid.temperature, fluid.amount, temperature, amount_removed)
+    fluid.amount = fluid.amount + amount_removed
     o.entity.fluidbox[1] = fluid
-    return true
+
+    -- calculate the optimal rate based on how much was added vs capacity. target is 90% fill.
+    local period = o.data.period or tank_min_period
+
+    if amount_removed >= (0.95 * target_amount) then
+      -- added over 95%, chop period in half
+      period = period / 2
+    elseif amount_removed < (0.05 * target_amount) then
+      -- added less than 5%, double period in half
+      period = period * 2
+    else
+      -- in the middle, so calculate the optimal period
+      local last_period = game.tick - (o.data._service_tick or 0)
+      period = math.floor(last_period * (target_amount * 0.9) / amount_removed)
+    end
+
+    -- clamp the period to the allowed range
+    period = math.min(tank_max_period, math.max(tank_min_period, period))
+    o.data.period = period
+    return period
   end
-  return false
+  return tank_max_period
 end
 
 function EntityHandlers.handle_storage_combinator(o)
@@ -484,6 +534,7 @@ local function populate_ghost(o, is_entity)
   if ghost_prototype == nil then
     return true
   end
+  local old_unum = entity.unit_number
 
   -- check to see if we have enough items in the network
   local item_list = ghost_prototype.items_to_place_this
@@ -501,6 +552,10 @@ local function populate_ghost(o, is_entity)
 
   local _, revived_entity, __ = entity.revive{raise_revive = true}
   if revived_entity ~= nil then
+    if old_unum ~= nil then
+      global.entities[old_unum] = nil
+    end
+
     -- NOTE: entity is now invalid
     for _, ing in ipairs(item_list) do
       Storage.remove_item(o.storage, ing.name, ing.count, true)

@@ -15,6 +15,8 @@ local Util = require "src.Util"
 
 local GUI_CLOSE_EVENT = "arr-entity-panel-close"
 local PRIORITISE_CHECKED_EVENT = "arr-entity-panel-prioritise"
+local PRIORITISE_CHECKED_PAUSE = "arr-entity-panel-pause"
+local STATUS_FLOW_NAME = "arr-entity-panel-status-flow"
 local CONDITION_ITEM_EVENT = "arr-entity-panel-condition-item"
 local CONDITION_OP_EVENT = "arr-entity-panel-condition-op"
 local CONDITION_VALUE_BUTTON_EVENT = "arr-entity-panel-condition-button"
@@ -81,6 +83,33 @@ local function add_panel_frame(parent, caption, tooltip)
   return frame
 end
 
+local function update_status_hflow(hflow, entity, data)
+  hflow.clear()
+  local storage = Storage.get_storage(entity)
+  local state = '??'
+  local st_icon = 'utility/status_not_working'
+  if entity.to_be_deconstructed() then
+    state = 'Deconstruct'
+  elseif data.paused == true then
+    state = 'Paused'
+  elseif not EntityCondition.evaluate(entity, data.condition, storage) then
+    state = 'Condition'
+  else
+    -- running
+    state = 'Working'
+    st_icon = 'utility/status_working'
+  end
+  hflow.add({
+    type = "sprite",
+    sprite = st_icon,
+    style = "status_image",
+  })
+  hflow.add({
+    type = "label",
+    caption = state,
+  })
+end
+
 local function add_gui_content(window, entity)
   local frame = window.add({
     type = "frame",
@@ -95,6 +124,29 @@ local function add_gui_content(window, entity)
     data = {}
     global.entity_data[data_id] = data
   end
+  -----------------------
+  -- status line
+  local hflow = frame.add({
+    name = STATUS_FLOW_NAME,
+    type = "flow",
+    direction = "horizontal",
+  })
+  update_status_hflow(hflow, entity, data)
+
+  -----------------------
+
+  frame.add({
+    type = "checkbox",
+    caption = "Pause [img=info]",
+    tooltip = "Pause all processing",
+    state = (data.paused == true),
+    tags = { id = data_id, event = PRIORITISE_CHECKED_PAUSE }
+  })
+  frame.add({
+    type = "line",
+    style = "control_behavior_window_line"
+  })
+  -------------------------
   frame.add({
     type = "checkbox",
     caption = "Prioritise [img=info]",
@@ -345,7 +397,7 @@ local function on_gui_opened(event, tags, player)
       name = GUICommon.GUI_ENTITY_PANEL,
       direction = "vertical",
       style = "inner_frame_in_outer_frame",
-      tags = { entity_name = entity.name }
+      tags = { entity_name = entity.name, entity_id = entity.unit_number }
     })
     GUICommon.create_header(window, "Auto Resource", GUI_CLOSE_EVENT)
     -- use the location from the previous time a similar UI was opened
@@ -395,6 +447,50 @@ local function on_gui_closed(event, tags, player)
   close_gui(player)
 end
 
+local function find_window_by_name(parent, name)
+  if parent.name == name then
+    return parent
+  end
+  for _, child in pairs(parent.children) do
+    if child.name == name then
+      return child
+    end
+    local ent = find_window_by_name(child, name)
+    if ent ~= nil then
+      return ent
+    end
+  end
+  return nil
+end
+
+local function update_entity_status_window(player, window)
+  local unit_number = window.tags.entity_id
+  if unit_number ~= nil then
+    local data = global.entity_data[unit_number]
+    local entity = global.entities[unit_number]
+    if entity ~= nil and data ~= nil then
+      local hflow = find_window_by_name(window, STATUS_FLOW_NAME)
+      if hflow ~= nil then
+        update_status_hflow(hflow, entity, data)
+      end
+    end
+  end
+end
+
+local function update_entity_status(player)
+  local window = player.gui.relative[GUICommon.GUI_ENTITY_PANEL]
+  if window then
+    update_entity_status_window(player, window)
+    return
+  end
+
+  window = player.gui.screen[GUICommon.GUI_ENTITY_PANEL]
+  if window then
+    update_entity_status_window(player, window)
+    return
+  end
+end
+
 function GUIEntityPanel.on_tick()
   -- assume mod UI is centered and reposition our panel based on the guessed width
   for player_id, t in pairs(global.entity_panel_pending_relocations) do
@@ -427,6 +523,12 @@ function GUIEntityPanel.on_tick()
     global.entity_panel_pending_relocations[player_id] = nil
     ::continue::
   end
+
+  if game.tick % 30 == 1 then
+    for _, player in pairs(game.players) do
+      update_entity_status(player)
+    end
+  end
 end
 
 function GUIEntityPanel.on_location_changed(event)
@@ -440,6 +542,10 @@ end
 
 local function on_prioritise_checked(event, tags, player)
   global.entity_data[tags.id].use_reserved = event.element.state
+end
+
+local function on_pause_checked(event, tags, player)
+  global.entity_data[tags.id].paused = event.element.state
 end
 
 local function on_condition_item_changed(event, tags, player)
@@ -513,6 +619,7 @@ GUIDispatcher.register(defines.events.on_gui_opened, nil, on_gui_opened)
 GUIDispatcher.register(defines.events.on_gui_closed, nil, on_gui_closed)
 
 GUIDispatcher.register(defines.events.on_gui_checked_state_changed, PRIORITISE_CHECKED_EVENT, on_prioritise_checked)
+GUIDispatcher.register(defines.events.on_gui_checked_state_changed, PRIORITISE_CHECKED_PAUSE, on_pause_checked)
 
 GUIDispatcher.register(defines.events.on_gui_elem_changed, CONDITION_ITEM_EVENT, on_condition_item_changed)
 GUIDispatcher.register(defines.events.on_gui_selection_state_changed, CONDITION_OP_EVENT, on_condition_op_changed)

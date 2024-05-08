@@ -275,8 +275,33 @@ function LogisticManager.handle_sink_chest(o)
     return false
   end
   local inventory = o.entity.get_inventory(defines.inventory.chest)
+  local empty_count = inventory.count_empty_stacks(false, false)
+
   local added_items, _ = Storage.add_from_inventory(o.storage, inventory, true)
-  return table_size(added_items) > 0
+
+  local empty_count2 = inventory.count_empty_stacks(false, false)
+
+  local period = o.data.period or 60
+  -- empty count should go up
+  local empty_delta = empty_count2 - empty_count
+  if empty_delta == 0 then
+    -- nothing was removed
+    period = period * 2
+  elseif empty_delta == #inventory then
+    -- the chest was full
+    period = period / 2
+  else
+    -- TODO: fine-tune based on the delta
+    local last_period = game.tick - (o.data._service_tick or 0)
+    period = last_period * (#inventory * 0.9) / empty_delta
+end
+
+  log(("[%s] %s %s %s per=%s"):format(o.entity.unit_number, empty_count, empty_count2, empty_delta, period))
+
+  --return table_size(added_items) > 0
+  period = math.min(10*60, math.max(60, math.floor(period)))
+  o.data.period = period
+  return period
 end
 
 function LogisticManager.handle_requester_chest(o)
