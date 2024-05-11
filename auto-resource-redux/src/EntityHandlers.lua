@@ -11,6 +11,10 @@ local LogisticManager = require "src.LogisticManager"
 local Storage = require "src.Storage"
 local Util = require "src.Util"
 
+-- FIXME: these should be global and/or configurable
+local service_period_max = 10 * 60
+local service_period_min = 60
+
 local function store_fluids(storage, entity, prod_type_pattern, ignore_limit)
   local remaining_fluids = {}
   local inserted = false
@@ -264,8 +268,9 @@ end
 
 function EntityHandlers.handle_lab(o)
   if o.paused then
-    return false
+    return service_period_max
   end
+  local old_status = o.entity.status
   local pack_count_target = math.ceil(o.entity.speed_bonus) + 1
   local lab_inv = o.entity.get_inventory(defines.inventory.lab_input)
   local inserted = false
@@ -277,8 +282,21 @@ function EntityHandlers.handle_lab(o)
     )
     inserted = inserted or (amount_inserted > 0)
   end
-  inserted = insert_fuel(o, false) or inserted
-  return inserted
+
+  insert_fuel(o, false)
+
+  -- tune the service period
+  local period = o.data.period or service_period_min
+  if inserted and old_status == defines.entity_status.missing_science_packs then
+    period = period / 2
+  elseif not inserted and old_status == defines.entity_status.working then
+    -- didn't add a science pack AND the lab is researching
+    period = period * 2
+  end
+  period = math.max(service_period_min, math.min(service_period_max, math.floor(period)))
+  o.data.period = period
+
+  return period
 end
 
 function EntityHandlers.handle_mining_drill(o)
