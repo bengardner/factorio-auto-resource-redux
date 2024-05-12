@@ -428,7 +428,7 @@ end
 function EntityHandlers.handle_requester_tank(o)
   local data = global.entity_data[o.entity.unit_number]
   if not data or o.paused then
-    return false
+    return service_period_max
   end
   local fluid = o.entity.fluidbox[1]
   if fluid and data.fluid and fluid.name ~= data.fluid then
@@ -437,7 +437,7 @@ function EntityHandlers.handle_requester_tank(o)
     fluid = nil
   end
   if not data.fluid then
-    return false
+    return service_period_max
   end
   fluid = fluid or {
     name = data.fluid,
@@ -448,7 +448,7 @@ function EntityHandlers.handle_requester_tank(o)
   local target_amount = math.floor(data.percent / 100 * capacity)
   local amount_needed = target_amount - fluid.amount
   if amount_needed <= 0 then
-    return false
+    return service_period_max
   end
   local amount_removed, temperature = Storage.remove_fluid_in_temperature_range(
     o.storage,
@@ -458,13 +458,32 @@ function EntityHandlers.handle_requester_tank(o)
     amount_needed,
     o.use_reserved
   )
-  fluid.temperature = Util.weighted_average(fluid.temperature, fluid.amount, temperature, amount_removed)
-  fluid.amount = fluid.amount + amount_removed
-  if fluid.amount > 0 then
+  if amount_removed > 0 then
+    fluid.temperature = Util.weighted_average(fluid.temperature, fluid.amount, temperature, amount_removed)
+    fluid.amount = fluid.amount + amount_removed
     o.entity.fluidbox[1] = fluid
-    return true
+
+    -- calculate the optimal rate based on how much was added vs capacity. target is 90% fill.
+    local period = o.data.period or service_period_min
+
+    if amount_removed >= (0.95 * target_amount) then
+      -- added over 95%, chop period in half
+      period = period / 2
+    elseif amount_removed < (0.05 * target_amount) then
+      -- added less than 5%, double period in half
+      period = period * 2
+    else
+      -- in the middle, so calculate the optimal period
+      local last_period = game.tick - (o.data._service_tick or 0)
+      period = math.floor(last_period * (target_amount * 0.9) / amount_removed)
+    end
+
+    -- clamp the period to the allowed range
+    period = math.min(service_period_max, math.max(service_period_min, period))
+    o.data.period = period
+    return period
   end
-  return false
+  return service_period_max
 end
 
 function EntityHandlers.handle_storage_combinator(o)
