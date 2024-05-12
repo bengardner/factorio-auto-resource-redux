@@ -152,6 +152,12 @@ function EntityManager.initialise()
     should_reload_entities = true
   end
 
+  if not Util.same_value(EntityGroups.names_to_groups, global.names_to_groups) then
+    should_reload_entities = true
+    global.names_to_groups = EntityGroups.names_to_groups
+    log(" ** names_to_groups changed!")
+  end
+
   -- DEBUG/SANITY check: remove entities that are no longer are valid
   local rm_cnt = 0
   for unit_number, entity in pairs(global.entities) do
@@ -168,7 +174,7 @@ function EntityManager.initialise()
   if should_reload_entities then
     EntityManager.reload_entities()
   end
-  log(("Managing %s entities"):format(table_size(global.entities)))
+  log(("Managing %s entities and %s names"):format(table_size(global.entities), table_size(EntityGroups.names_to_groups)))
 end
 
 -------------------------------------------------------------------------------
