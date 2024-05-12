@@ -387,18 +387,42 @@ end
 
 function EntityHandlers.handle_sink_tank(o)
   if o.paused then
-    return false
+    return service_period_max
   end
-  local fluid = o.entity.fluidbox[1]
-  if fluid == nil then
-    return false
+
+  local fluidbox = o.entity.fluidbox
+  local fluid = fluidbox[1]
+
+  if fluid == nil or fluid.amount < 1 then
+    return service_period_max -- tank is empty
   end
+
   local new_fluid, amount_added = Storage.add_fluid(o.storage, fluid)
   if amount_added > 0 then
     o.entity.fluidbox[1] = new_fluid.amount > 0 and new_fluid or nil
-    return true
+
+    -- calculate the optimal service_period based on the amount delivered
+    local capacity = fluidbox.get_capacity(1)
+
+    local period = o.data.period or service_period_min
+    if amount_added >= (0.95 * capacity) then
+      -- added over 95%, chop period in half
+      period = period / 2
+    elseif amount_added < (0.05 * capacity) then
+      -- added less than 5%, double period in half
+      period = period * 2
+    else
+      -- in the middle, so calculate the optimal period
+      local last_period = game.tick - (o.data._service_tick or 0)
+      period = math.floor(last_period * (capacity * 0.9) / amount_added)
+    end
+    period = math.max(service_period_min, math.min(service_period_max, period))
+    o.data.period = period
+    return period
   end
-  return false
+
+  -- not feeding the network, must be full
+  return service_period_max
 end
 
 function EntityHandlers.handle_requester_tank(o)
