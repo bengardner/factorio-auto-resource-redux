@@ -266,6 +266,22 @@ function EntityHandlers.handle_furnace(o)
   return EntityHandlers.handle_assembler(o, recipe, switched)
 end
 
+function EntityHandlers.handle_rocket_silo(o)
+  local out_inv = o.entity.get_inventory(defines.inventory.rocket_silo_output)
+  if out_inv ~= nil then
+    Storage.add_from_inventory(o.storage, out_inv, false)
+  end
+
+  local recipe = o.entity.get_recipe()
+  local inp_inv = o.entity.get_inventory(defines.inventory.rocket_silo_input)
+
+  if recipe ~= nil and inp_inv ~= nil then
+    return EntityHandlers.handle_assembler(o, recipe, false)
+  end
+
+  return service_period_max
+end
+
 function EntityHandlers.handle_lab(o)
   if o.paused then
     return service_period_max
