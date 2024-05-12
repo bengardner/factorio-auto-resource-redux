@@ -301,17 +301,16 @@ end
 
 function EntityHandlers.handle_mining_drill(o)
   if o.paused then
-    return false
+    return service_period_max
   end
-  local busy = insert_fuel(o, false)
+  insert_fuel(o, false)
   if #o.entity.fluidbox > 0 then
     -- there is no easy way to know what fluid a miner wants, the fluid is a property of the ore's prototype
     -- and the expected resources aren't simple to find: https://forums.factorio.com/viewtopic.php?p=247019
     -- so it will have to be done manually using the fluid access tank
     local _, inserted = store_fluids(o.storage, o.entity, "^output$")
-    busy = busy or inserted
   end
-  return busy
+  return service_period_max
 end
 
 function EntityHandlers.handle_boiler(o)
