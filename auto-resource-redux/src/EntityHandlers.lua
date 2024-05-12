@@ -329,7 +329,7 @@ end
 
 function EntityHandlers.handle_reactor(o)
   if o.paused then
-    return false
+    return service_period_max
   end
   local busy = insert_fuel(o, true)
   local result_inventory = o.entity.get_burnt_result_inventory()
@@ -337,7 +337,7 @@ function EntityHandlers.handle_reactor(o)
     local added_items = Storage.add_from_inventory(o.storage, result_inventory, false)
     busy = table_size(added_items) > 0 or busy
   end
-  return busy
+  return service_period_max
 end
 
 function EntityHandlers.handle_turret(o)
