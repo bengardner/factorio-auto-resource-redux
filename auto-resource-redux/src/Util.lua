@@ -117,6 +117,38 @@ function Util.table_min_val(dict)
   return min
 end
 
+--- Compare two simple values. No metatables. No table loops.
+---@param value1 any  the first value
+---@param value2 any  the second value
+---@return boolean whether the two values are the same
+function Util.same_value(value1, value2)
+  -- both nil or different type => false
+  if type(value2) ~= type(value1) or value1 == nil then
+    return false
+  end
+  -- catches strings, nil, numbers, same table pointers, and custom equality functions
+  if value1 == value2 then
+    return true
+  end
+  if type(value1) ~= "table" then
+    return false
+  end
+  -- both values are tables
+  for k1, v1 in pairs(value1) do
+    local v2 = value2[k1]
+    if not Util.same_value(v1, v2) then
+      return false
+    end
+  end
+  for k2, v2 in pairs(value2) do
+    local v1 = value1[k2]
+    if not Util.same_value(v1, v2) then
+      return false
+    end
+  end
+  return true
+end
+
 --- Extends the dest array with the contents of the src array
 ---@param dest table The destination array (will be modified)
 ---@param src table The source array
