@@ -3,6 +3,10 @@ local LogisticManager = {}
 local Storage = require "src.Storage"
 local Util = require "src.Util"
 
+-- FIXME: should be global and/or configurable
+local service_period_max = 10 * 60
+local service_period_min = 60
+
 -- Ticks between handling player logistics
 local TICKS_PER_LOGISTIC_UPDATE = 90
 
@@ -261,11 +265,32 @@ end
 function LogisticManager.handle_sink_chest(o)
   clean_up_deadline_table(global.busy_logistic_chests)
   if global.busy_logistic_chests[o.entity.unit_number] or o.paused then
-    return false
+    return service_period_max
   end
   local inventory = o.entity.get_inventory(defines.inventory.chest)
+  local empty_count = inventory.count_empty_stacks(false, false)
+
   local added_items, _ = Storage.add_from_inventory(o.storage, inventory, true)
-  return table_size(added_items) > 0
+
+  local empty_count2 = inventory.count_empty_stacks(false, false)
+
+  local period = o.data.period or service_period_min
+  -- empty count should go up
+  local empty_delta = empty_count2 - empty_count
+  if empty_delta == 0 then
+    -- nothing was removed
+    period = period * 2
+  elseif empty_delta == #inventory then
+    -- the chest was full (unlikely!)
+    period = period / 2
+  else
+    -- fine-tune based on the delta
+    local last_period = game.tick - (o.data._service_tick or 0)
+    period = last_period * (#inventory * 0.9) / empty_delta
+  end
+  period = math.min(service_period_max, math.max(service_period_min, math.floor(period)))
+  o.data.period = period
+  return period
 end
 
 function LogisticManager.handle_requester_chest(o)
