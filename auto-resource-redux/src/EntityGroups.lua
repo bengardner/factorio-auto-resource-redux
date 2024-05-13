@@ -25,6 +25,7 @@ EntityGroups.entity_group_filters = {
   { "arr-combinator", { filter = "name", name = "arr-combinator" }},
   { "entity-ghost", { filter = "type", type = "entity-ghost" }},
   { "tile-ghost", { filter = "type", type = "tile-ghost" }},
+  { "mining-depot", { filter = "name", name = "mining-depot" }},
 }
 
 function EntityGroups.calculate_groups()

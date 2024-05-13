@@ -44,6 +44,7 @@ local entity_queue_specs = {
   ["arr-combinator"] = { handler = EntityHandlers.handle_storage_combinator, ticks_per_cycle = 12 },
   ["entity-ghost"] = { handler = EntityHandlers.handle_entity_ghost, ticks_per_cycle = 120 },
   ["tile-ghost"] = { handler = EntityHandlers.handle_tile_ghost, ticks_per_cycle = 120 },
+  ["mining-depot"] = { handler = EntityHandlers.handle_mining_depot, ticks_per_cycle = 10*60 },
 }
 
 local function on_entity_removed(entity_id)
