@@ -134,7 +134,7 @@ function EntityCustomData.on_built(event)
 end
 
 function EntityCustomData.set_data(entity_or_ghost, new_data)
-  if entity_or_ghost.unit_number == nil then
+  if not entity_or_ghost.valid or entity_or_ghost.unit_number == nil then
     return
   end
   if new_data and new_data.furnace_recipe then

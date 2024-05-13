@@ -1,7 +1,7 @@
 local EntityHandlers = {}
 
 -- seconds to attempt to keep assemblers fed for
-local TARGET_INGREDIENT_CRAFT_TIME = 2
+local TARGET_INGREDIENT_CRAFT_TIME = 10
 
 local EntityCondition = require "src.EntityCondition"
 local EntityCustomData = require "src.EntityCustomData"
@@ -12,6 +12,10 @@ local Storage = require "src.Storage"
 local FluidBoxScan = require "src.FluidBoxScan"
 local Util = require "src.Util"
 local Destroyer = require "src.Destroyer"
+
+-- FIXME: these should be global and/or configurable
+local service_period_max = 10 * 60
+local service_period_min = 60
 
 local function store_fluids(storage, entity, prod_type_pattern, ignore_limit)
   local remaining_fluids = {}
@@ -143,7 +147,8 @@ end
 --- Inserts fuel into the first slot of an entity's fuel inventory using its priority set
 ---@param o table
 ---@param default_use_reserved boolean
----@return boolean inserted
+-- @return boolean inserted
+---@reutrn number of ticks until the next refuel
 local function insert_fuel(o, default_use_reserved)
   local inventory = o.entity.get_fuel_inventory()
   if inventory and #inventory >= 1 then
@@ -156,46 +161,182 @@ local function insert_fuel(o, default_use_reserved)
   return false
 end
 
+-------------------------------------------------------------------------------
+--[[
+Determine the maximum recipe multiplier for this recipe that
+will fit in this assembler.
+I don't think this depends on beacons.
+
+Cached info is stored as:
+  global.recipe_info[recipe.name][assembler_name] = { max_multiplier=2 }
+
+TODO: figure out fluids!
+]]
+local function GetRecipeInfo(recipe, entity, storage)
+  if global.recipe_info == nil then
+    global.recipe_info = {}
+  end
+  local rin = global.recipe_info[recipe.name]
+  if rin == nil then
+    rin = {}
+    global.recipe_info[recipe.name] = rin
+  end
+  local asi = rin[entity.name]
+  if asi == nil then
+    asi = {}
+    rin[entity.name] = asi
+  end
+
+  if next(asi) == nil then
+    local out_inventory = entity.get_inventory(defines.inventory.assembling_machine_output)
+    local inp_inventory = entity.get_inventory(defines.inventory.assembling_machine_input)
+    Storage.add_from_inventory(storage, out_inventory, true)
+    Storage.add_from_inventory(storage, inp_inventory, true)
+    -- dump both input and output fluids
+    store_fluids(storage, entity, nil, true)
+
+    -- should be no-ops, unless the item can't be stored. then it is lost.
+    -- but this only happens once.
+    out_inventory.clear()
+    inp_inventory.clear()
+    entity.clear_fluid_inside()
+
+    log(("GetRecipeInfo(%s, %s)"):format(recipe.name, entity.name))
+    log((" - ing  = %s"):format(serpent.line(recipe.ingredients)))
+    log((" - prod = %s"):format(serpent.line(recipe.products)))
+
+    local max_mult = 9999
+    local out_capacity = {} -- debug
+    local out_recipes = {}  -- debug
+    for _, prod in pairs(recipe.products) do
+      if prod.type == "item" then
+        local n_inserted = out_inventory.insert({ name=prod.name, count=65535 })
+        out_capacity[prod.name] = n_inserted
+
+        local prod_amount
+        if prod.amount ~= nil then
+          prod_amount = prod.amount
+        else
+          prod_amount = prod.amount_max
+        end
+        local item_proto = game.item_prototypes[prod.name]
+        if item_proto ~= nil and prod_amount > item_proto.stack_size then
+          prod_amount = item_proto.stack_size
+        end
+        local mult = n_inserted / prod_amount
+        max_mult = math.min(mult, max_mult)
+        out_recipes[prod.name] = mult
+
+      elseif prod.type == "fluid" then
+        log((" - fluid = %s"):format(prod.name))
+        local n_inserted = entity.insert_fluid({ name=prod.name, amount=999999 })
+        out_capacity[prod.name] = n_inserted
+        local mult
+        if prod.amount ~= nil then
+          mult = n_inserted / prod.amount
+        else
+          mult = n_inserted / prod.amount_max
+        end
+        max_mult = math.min(mult, max_mult)
+        out_recipes[prod.name] = mult
+
+        --[[
+        for i, fluid, filter, _ in Util.iter_fluidboxes(entity, "^", true) do
+          local proto = entity.fluidbox.get_prototype(i)
+          log((" - fbox i=%s fluid=%s filter=%s proto=%s pidx=%s vol=%s area=%s"):format(
+            i,
+            serpent.line(fluid),
+            serpent.line(filter),
+            proto,
+            proto.index,
+            proto.volume,
+            proto.area
+          ))
+          for k, b in pairs(proto) do
+            print(k, b.index, b.volume)
+          end
+        end
+        ]]
+      end
+    end
+    out_inventory.clear()
+    entity.clear_fluid_inside()
+
+    local inp_capacity = {} -- debug
+    local inp_recipes = {}  -- debug
+    for _, ing in pairs(recipe.ingredients) do
+      if ing.type == "item" then
+        local n_inserted = inp_inventory.insert({ name=ing.name, count=9999 })
+        inp_capacity[ing.name] = n_inserted
+        local mult = n_inserted / ing.amount
+        inp_recipes[ing.name] = mult
+        max_mult = math.min(mult, max_mult)
+      elseif ing.type == "fluid" then
+        local n_inserted = entity.insert_fluid({ name=ing.name, amount=999999 })
+        inp_capacity[ing.name] = n_inserted
+        local mult = n_inserted / ing.amount
+        inp_recipes[ing.name] = mult
+        max_mult = math.min(mult, max_mult)
+      end
+    end
+    inp_inventory.clear()
+    entity.clear_fluid_inside()
+
+    asi.max_multiplier = math.ceil(max_mult)
+
+    -- DEBUG:
+    log((" - inp_cap = %s"):format(serpent.line(inp_capacity)))
+    log((" - inp_rec = %s"):format(serpent.line(inp_recipes)))
+    log((" - out_cap = %s"):format(serpent.line(out_capacity)))
+    log((" - out_rec = %s"):format(serpent.line(out_recipes)))
+    log((" - mult    = %s"):format(asi.max_multiplier))
+  end
+  return asi
+end
+
+local assembling_machine_period_min = 120
+local assembling_machine_period_max = TARGET_INGREDIENT_CRAFT_TIME * 60
+
 function EntityHandlers.handle_assembler(o, override_recipe, clear_inputs)
   local entity, storage = o.entity, o.storage
   local recipe = override_recipe or entity.get_recipe()
   if recipe == nil then
-    return false
+    -- FIXME: check this entity on_gui_close to see if the recipe changed. re-queue on change.
+    return assembling_machine_period_max
   end
 
-  -- always try to pick up outputs
+  -- get the cached max_multiplier based on the assembler and recipe
+  local max_multiplier = GetRecipeInfo(recipe, entity, storage).max_multiplier
+
+  -- always try to pick up outputs, even if disabled
   local output_inventory = entity.get_inventory(defines.inventory.assembling_machine_output)
   local _, remaining_items = Storage.add_from_inventory(storage, output_inventory, false)
+
+  -- REVISIT: is this still true?
   -- TODO: we're storing all fluids here, so a recipe that has the same input and output fluid
   -- might get stuck as the output will be stored first
   Util.dictionary_merge(remaining_items, store_fluids(storage, entity))
 
   if o.paused then
-    return false
+    return assembling_machine_period_max
   end
-  local inserted = insert_fuel(o, false)
-  -- check if we should craft
-  if entity.is_crafting() and (1 - entity.crafting_progress) * (recipe.energy / entity.crafting_speed) > TARGET_INGREDIENT_CRAFT_TIME then
-    return false
-  end
-  local has_empty_slot = false
-  for _, item in ipairs(recipe.products) do
-    local storage_key = item.name
-    if item.type == "fluid" then
-      storage_key = Storage.get_fluid_storage_key(item.name)
-    end
 
-    if remaining_items[storage_key] == nil then
-      has_empty_slot = true
-    end
+  local input_inventory = entity.get_inventory(defines.inventory.assembling_machine_input)
+
+  -- if we have any stuck outputs, then remove the inputs and wait for the max period
+  if next(remaining_items) then
+    log(("[%s] %s r=%s output stuck"):format(entity.unit_number, entity.name, recipe.name))
+    Storage.add_from_inventory(storage, input_inventory, false)
+    return assembling_machine_period_max
   end
-  if not has_empty_slot then
-    return false
-  end
+
+  -- FIXME: need the max period from the fuel
+  local inserted = insert_fuel(o, false)
+
+  local recipe_ticks = recipe.energy / entity.crafting_speed * 60
 
   local crafts_per_second = entity.crafting_speed / recipe.energy
-  local ingredient_multiplier = math.max(1, math.ceil(TARGET_INGREDIENT_CRAFT_TIME * crafts_per_second))
-  local input_inventory = entity.get_inventory(defines.inventory.assembling_machine_input)
+  local ingredient_multiplier = math.min(max_multiplier, math.ceil(TARGET_INGREDIENT_CRAFT_TIME * crafts_per_second))
   if clear_inputs then
     Storage.add_from_inventory(storage, input_inventory, true)
     store_fluids(storage, entity, nil, true)
@@ -227,8 +368,33 @@ function EntityHandlers.handle_assembler(o, override_recipe, clear_inputs)
       )
     end
     local craftable_ratio = math.floor((storage_amount + (input_items[storage_key] or 0)) / math.ceil(ingredient.amount))
+
+
+    --log(("[%s] %s t=%s amt=%s cr=%s sa=%s mp=%s"):format(entity.unit_number, entity.name, storage_key, ingredient.amount, craftable_ratio, storage_amount, max_period))
+
     ingredient_multiplier = Util.clamp(craftable_ratio, 1, ingredient_multiplier)
   end
+
+--[[
+calculate time for one recipe. Get multiplier based on that and max period.
+Get current inputs.
+Get available inputs.
+Reduce the multiplier based on the max number of recipes based on available inputs.
+Add ingredients. If unable to add items, then ...
+  Get current inputs.
+  Calculate the max number of recipes based on actualy contents.
+  Save this in entity_data. It won't change.
+Set timeout to handle the number of recipes. (Service when recipes should be done.)
+
+-- if the actual max is less than
+
+ 359.744 Script @__auto-resource-redux__/src/EntityHandlers.lua:287: [119] rocket-silo name=low-density-structure amt=1 cr=32 sa=25
+ 359.744 Script @__auto-resource-redux__/src/EntityHandlers.lua:287: [119] rocket-silo name=rocket-control-unit amt=1 cr=32 sa=25
+ 359.744 Script @__auto-resource-redux__/src/EntityHandlers.lua:287: [119] rocket-silo name=rocket-fuel amt=3 cr=25 sa=75
+ 359.744 Script @__auto-resource-redux__/src/EntityHandlers.lua:287: [119] rocket-silo name=se-heat-shielding amt=1 cr=32 sa=25
+ 359.745 Script @__auto-resource-redux__/src/EntityHandlers.lua:317: [119] rocket-silo r=rocket-part mult=25 i={{amount = 1, name = "low-density-structure", type = "item"}, {amount = 1, name = "rocket-control-unit", type = "item"}, {amount = 3, name = "rocket-fuel", type = "item"}, {amount = 1, name = "se-heat-shielding", type = "item"}}
+
+]]
 
   -- insert ingredients
   local fluid_targets = {}
@@ -252,8 +418,20 @@ function EntityHandlers.handle_assembler(o, override_recipe, clear_inputs)
       end
     end
   end
+
+  -- local contents = input_inventory.get_contents()
+
+  local period = math.min(math.floor(ingredient_multiplier * recipe_ticks), assembling_machine_period_max)
+
+  log(("[%s] %s r=%s mult=%s period=%s"):format(entity.unit_number, entity.name, recipe.name, ingredient_multiplier,
+    period))
+
   inserted = insert_fluids(o, fluid_targets) or inserted
-  return inserted
+  --return inserted
+  if entity.status == defines.entity_status.working then
+    return period
+  end
+  return assembling_machine_period_max
 end
 
 function EntityHandlers.handle_furnace(o)
@@ -264,11 +442,35 @@ function EntityHandlers.handle_furnace(o)
   return EntityHandlers.handle_assembler(o, recipe, switched)
 end
 
+function EntityHandlers.handle_rocket_silo(o)
+  local out_inv = o.entity.get_inventory(defines.inventory.rocket_silo_output)
+  if out_inv ~= nil then
+    Storage.add_from_inventory(o.storage, out_inv, false)
+  end
+
+  local recipe = o.entity.get_recipe()
+  local inp_inv = o.entity.get_inventory(defines.inventory.rocket_silo_input)
+
+  if recipe ~= nil and inp_inv ~= nil then
+    return EntityHandlers.handle_assembler(o, recipe, false)
+  end
+
+  return service_period_max
+end
+
 function EntityHandlers.handle_lab(o)
   if o.paused then
-    return false
+    return service_period_max
   end
+  local old_status = o.entity.status
   local pack_count_target = math.ceil(o.entity.speed_bonus) + 1
+  --[[
+  local prot = o.entity.prototype
+  log(("[%s] [%s] pct=%s speed=%s bonus=%s state=%s"):format(o.entity.unit_number, o.entity.name, pack_count_target,
+    prot.researching_speed,
+    o.entity.speed_bonus,
+    o.entity.status))
+  ]]
   local lab_inv = o.entity.get_inventory(defines.inventory.lab_input)
   local inserted = false
   for i, item_name in ipairs(game.entity_prototypes[o.entity.name].lab_inputs) do
@@ -279,23 +481,37 @@ function EntityHandlers.handle_lab(o)
     )
     inserted = inserted or (amount_inserted > 0)
   end
-  inserted = insert_fuel(o, false) or inserted
-  return inserted
+
+  insert_fuel(o, false)
+
+  -- tune the service period
+  local period = o.data.period or service_period_min
+  if inserted and old_status == defines.entity_status.missing_science_packs then
+    period = period / 2
+  elseif not inserted and old_status == defines.entity_status.working then
+    -- didn't add a science pack AND the lab is researching
+    period = period * 2
+  end
+  period = math.max(service_period_min, math.min(service_period_max, math.floor(period)))
+  o.data.period = period
+
+  return period
 end
 
+-- FIXME: if a mining drill doesn't use fuel AND it doesn't output fluids, then
+--    there is no reason to service it at all. Unless we start to provide mining fluid.
 function EntityHandlers.handle_mining_drill(o)
   if o.paused then
-    return false
+    return service_period_max
   end
-  local busy = insert_fuel(o, false)
+  insert_fuel(o, false)
   if #o.entity.fluidbox > 0 then
     -- there is no easy way to know what fluid a miner wants, the fluid is a property of the ore's prototype
     -- and the expected resources aren't simple to find: https://forums.factorio.com/viewtopic.php?p=247019
     -- so it will have to be done manually using the fluid access tank
     local _, inserted = store_fluids(o.storage, o.entity, "^output$")
-    busy = busy or inserted
   end
-  return busy
+  return service_period_max
 end
 
 function EntityHandlers.handle_boiler(o)
@@ -312,9 +528,10 @@ function EntityHandlers.handle_burner_generator(o)
   return insert_fuel(o, true)
 end
 
+-- REVISIT: reactors don't burn fuel fast, so always use the max period
 function EntityHandlers.handle_reactor(o)
   if o.paused then
-    return false
+    return service_period_max
   end
   local busy = insert_fuel(o, true)
   local result_inventory = o.entity.get_burnt_result_inventory()
@@ -322,9 +539,10 @@ function EntityHandlers.handle_reactor(o)
     local added_items = Storage.add_from_inventory(o.storage, result_inventory, false)
     busy = table_size(added_items) > 0 or busy
   end
-  return busy
+  return service_period_max
 end
 
+-- TODO: calculate the max fire rate / ammo consumption to determine optimal service period?
 function EntityHandlers.handle_turret(o)
   if o.paused then
     return false
@@ -369,30 +587,26 @@ function EntityHandlers.handle_sink_chest(o, ignore_limit)
   return table_size(added_items) > 0
 end
 
-local sink_min_period = 60
-local sink_max_period = 10 * 60
-
 function EntityHandlers.handle_sink_tank(o)
   if o.paused then
-    return sink_max_period -- paused
+    return service_period_max
   end
 
   local fluidbox = o.entity.fluidbox
   local fluid = fluidbox[1]
 
   if fluid == nil or fluid.amount < 1 then
-    return sink_max_period -- tank is empty
+    return service_period_max -- tank is empty
   end
 
   local new_fluid, amount_added = Storage.add_fluid(o.storage, fluid)
   if amount_added > 0 then
-    -- stash leftovers
     o.entity.fluidbox[1] = new_fluid.amount > 0 and new_fluid or nil
 
     -- calculate the optimal service_period based on the amount delivered
     local capacity = fluidbox.get_capacity(1)
 
-    local period = o.data.period or sink_min_period
+    local period = o.data.period or service_period_min
     if amount_added >= (0.95 * capacity) then
       -- added over 95%, chop period in half
       period = period / 2
@@ -404,13 +618,13 @@ function EntityHandlers.handle_sink_tank(o)
       local last_period = game.tick - (o.data._service_tick or 0)
       period = math.floor(last_period * (capacity * 0.9) / amount_added)
     end
-    period = math.max(sink_min_period, math.min(sink_max_period, period))
+    period = math.max(service_period_min, math.min(service_period_max, period))
     o.data.period = period
     return period
   end
 
   -- not feeding the network, must be full
-  return sink_max_period
+  return service_period_max
 end
 
 local tank_min_period = 60
@@ -422,12 +636,12 @@ function EntityHandlers.handle_requester_tank(o)
   if data == nil or not data.fluid then
     data = data or {}
     if not FluidBoxScan.autoconfig_request(o.entity, data) then
-      return tank_max_period
+      return service_period_max
     end
     global.entity_data[o.entity.unit_number] = data
   end
   if o.paused then
-    return tank_max_period
+    return service_period_max
   end
   local fluid = o.entity.fluidbox[1]
   if fluid and data.fluid and fluid.name ~= data.fluid then
@@ -444,7 +658,7 @@ function EntityHandlers.handle_requester_tank(o)
   local target_amount = math.floor(data.percent / 100 * capacity)
   local amount_needed = target_amount - fluid.amount
   if amount_needed <= 0 then
-    return tank_max_period
+    return service_period_max
   end
   local amount_removed, temperature = Storage.remove_fluid_in_temperature_range(
     o.storage,
@@ -460,7 +674,7 @@ function EntityHandlers.handle_requester_tank(o)
     o.entity.fluidbox[1] = fluid
 
     -- calculate the optimal rate based on how much was added vs capacity. target is 90% fill.
-    local period = o.data.period or tank_min_period
+    local period = o.data.period or service_period_min
 
     if amount_removed >= (0.95 * target_amount) then
       -- added over 95%, chop period in half
@@ -475,11 +689,11 @@ function EntityHandlers.handle_requester_tank(o)
     end
 
     -- clamp the period to the allowed range
-    period = math.min(tank_max_period, math.max(tank_min_period, period))
+    period = math.min(service_period_max, math.max(service_period_min, period))
     o.data.period = period
     return period
   end
-  return tank_max_period
+  return service_period_max
 end
 
 function EntityHandlers.handle_storage_combinator(o)
@@ -532,7 +746,7 @@ local function populate_ghost(o, is_entity)
   local entity = o.entity
   local ghost_prototype = entity.ghost_prototype
   if ghost_prototype == nil then
-    return true
+    return -1 -- stop processing!
   end
   local old_unum = entity.unit_number
 
@@ -547,7 +761,7 @@ local function populate_ghost(o, is_entity)
   end
   if missing then
     -- waiting for items
-    return true
+    return 10*60
   end
 
   local _, revived_entity, __ = entity.revive{raise_revive = true}
@@ -560,11 +774,11 @@ local function populate_ghost(o, is_entity)
     for _, ing in ipairs(item_list) do
       Storage.remove_item(o.storage, ing.name, ing.count, true)
     end
-    return
+    return 10*60
   end
 
   -- failed: likely blocked, try again later
-  return true
+  return 10*60
 end
 
 function EntityHandlers.handle_entity_ghost(o)
@@ -573,6 +787,29 @@ end
 
 function EntityHandlers.handle_tile_ghost(o)
   return populate_ghost(o, false)
+end
+
+-- Special assembling-machine that gets one more drone per service
+function EntityHandlers.handle_mining_depot(o)
+  local entity = o.entity
+  local recipe = entity.get_recipe()
+  local inp_inventory = entity.get_inventory(defines.inventory.assembling_machine_input)
+  local out_inventory = entity.get_inventory(defines.inventory.assembling_machine_output)
+  local period = service_period_max
+
+  -- dump the output inventory
+  Storage.add_from_inventory(o.storage, out_inventory, false)
+
+  -- try to add one more drone
+  if recipe ~= nil and inp_inventory ~= nil then
+    for _, ing in pairs(recipe.ingredients) do
+      local n_added = Storage.put_in_inventory(o.storage, inp_inventory, ing.name, 1, false)
+      if n_added > 0 then
+        period = 2 * 60
+      end
+    end
+  end
+  return period
 end
 
 return EntityHandlers

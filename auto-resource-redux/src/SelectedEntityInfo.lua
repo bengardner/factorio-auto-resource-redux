@@ -1,18 +1,20 @@
 local EntityGroups = require 'src.EntityGroups'
+local Util = require "src.Util"
 
 local super_debug = true
 
-local function get_sprite_name(name)
-  if game.item_prototypes[name] ~= nil then
-    return "item/" .. name
-  end
-  if game.fluid_prototypes[name] ~= nil then
-    return "fluid/" .. name
-  end
-end
-
 local function ticks_to_text(ticks)
   return string.format('%s ticks (%.1f seconds)', ticks, ticks / 60)
+end
+
+local cached_status = {} -- key=value, val=name
+local function entity_status_to_name(status)
+  if next(cached_status) == nil then
+    for k, v in pairs(defines.entity_status) do
+      cached_status[v] = k
+    end
+  end
+  return cached_status[status]
 end
 
 local function update_player_selected(player)
@@ -54,7 +56,6 @@ local function update_player_selected(player)
   -- add the header
   local hdr_frame = vflow.add {
     type = "frame",
-    name = gname,
     style = "tooltip_title_frame_light",
     ignored_by_interaction = true,
   }
@@ -79,7 +80,6 @@ local function update_player_selected(player)
   }
   hdr_table.add {
     type="label",
-    name="MYSUPERTEST-text",
     caption = { '', prefix, localised_name, string.format(" [%s]", entity.unit_number) },
     style = "tooltip_heading_label",
   }
@@ -90,19 +90,30 @@ local function update_player_selected(player)
     direction = "vertical",
   }
 
-  if super_debug == true then
+  if super_debug then
     -- debug: log info
-    local xi = {}
+    local xi = { unit_number = entity.unit_number }
     for k, v in pairs(info) do
       if k ~= "entity" then
         xi[k] = v
       end
     end
-    desc_flow.add {
-      type="label",
-      caption = serpent.line(xi),
-      ignored_by_interaction = true,
-    }
+    if entity.type == "assembling-machine" then
+      local rr = entity.get_recipe()
+      if rr then
+        xi.recipe = rr.name
+        xi.products = rr.products
+        xi.ingredients = rr.ingredients
+      end
+    end
+    if global.player_selected_unum == nil then
+      global.player_selected_unum = {}
+    end
+    local pxi = global.player_selected_unum[player.index] or {}
+    if not Util.same_value(pxi, xi) then
+      global.player_selected_unum[player.index] = xi
+      log(serpent.block(xi))
+    end
   end
 
   local tt = desc_flow.add {
@@ -153,38 +164,17 @@ local function update_player_selected(player)
         caption = ticks_to_text(info._service_period),
       }
     end
+    if info._service_period ~= nil then
+      tt.add {
+        type="label",
+        caption = "[font=default-bold]Status[/font]",
+      }
+      tt.add {
+        type="label",
+        caption = string.format("%s %s", entity.status, entity_status_to_name(entity.status)),
+      }
+    end
   end
-
---[[
-  if info.service_type ~= nil then
-    desc_flow.add {
-      type="label",
-      caption = string.format("Service type: %s", info.service_type),
-      ignored_by_interaction = true,
-    }
-  end
-  if info.service_priority ~= nil then
-    desc_flow.add {
-      type="label",
-      caption = string.format("Service priority: %s", info.service_priority),
-      ignored_by_interaction = true,
-    }
-  end
-  if info.service_tick_delta ~= nil then
-    desc_flow.add {
-      type="label",
-      caption = string.format("Service period: %.2f seconds", info.service_tick_delta / 60),
-      ignored_by_interaction = true,
-    }
-  end
-  if info.service_tick ~= nil then
-    desc_flow.add {
-      type="label",
-      caption = string.format("Service tick: %s", info.service_tick),
-      ignored_by_interaction = true,
-    }
-  end
-  ]]
 end
 
 
