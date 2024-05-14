@@ -98,6 +98,14 @@ local function update_player_selected(player)
         xi[k] = v
       end
     end
+    if entity.type == "assembling-machine" then
+      local rr = entity.get_recipe()
+      if rr then
+        xi.recipe = rr.name
+        xi.products = rr.products
+        xi.ingredients = rr.ingredients
+      end
+    end
     if global.player_selected_unum == nil then
       global.player_selected_unum = {}
     end
