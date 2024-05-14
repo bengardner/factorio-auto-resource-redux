@@ -8,12 +8,14 @@ local FurnaceRecipeManager = require "src.FurnaceRecipeManager"
 local LogisticManager = require "src.LogisticManager"
 local DeadlineQueue = require "src.DeadlineQueue"
 local Storage = require "src.Storage"
+local RunningAverage = require 'src.RunningAverage'
 local Util = require "src.Util"
 
 -- NOTE: a higher DEADLINE_QUEUE_TICKS wastes CPU, as we have to check if each entry has really expired.
 -- Maybe go with 4 and use next_coarse() to skip the checks? Can be optimized later.
 local DEADLINE_QUEUE_TICKS = 1
 local DEADLINE_QUEUE_COUNT = 200
+-- these should be configurable, esp. the max, as that will impact UPS
 local SERVICE_PER_TICK_MIN = 20
 local SERVICE_PER_TICK_MAX = 80
 
@@ -156,10 +158,10 @@ function EntityManager.initialise()
   if not Util.same_value(EntityGroups.names_to_groups, global.names_to_groups) then
     should_reload_entities = true
     global.names_to_groups = EntityGroups.names_to_groups
-    log(" ** names_to_groups changed!")
+    log(" *** EntityGroups.names_to_groups changed!")
   end
 
-  -- DEBUG/SANITY check: remove entities that are no longer are valid
+  -- DEBUG/SANITY check: remove entities that are no longer valid
   local rm_cnt = 0
   for unit_number, entity in pairs(global.entities) do
     if not entity.valid then
@@ -181,22 +183,24 @@ end
 -------------------------------------------------------------------------------
 
 function EntityManager.on_tick()
+
+  local ra = global.deadline_average
+  if ra == nil then
+    ra = RunningAverage.new(180)
+    global.deadline_average = ra
+  end
+
   local now = game.tick
   local dlq = global.deadline_queue
-  local ept = global.entities_per_tick or 20
   local cache_table = {}
 
-  -- calculate the number of items to service on this tick.
-  local cur_q_cnt = DeadlineQueue.get_current_count(dlq)
-  local service_per_tick = math.max(SERVICE_PER_TICK_MIN, math.min(SERVICE_PER_TICK_MAX, cur_q_cnt / DEADLINE_QUEUE_TICKS))
+  -- calculate entities-per-tick
+  local ept = Util.clamp(math.ceil(ra.get_average() + (now - dlq.deadline)), SERVICE_PER_TICK_MIN, SERVICE_PER_TICK_MAX)
 
   local processed_cnt = 0
-
-  local hit_end = false
   for _ = 1, ept do
     local entity_id, _ = DeadlineQueue.next(dlq)
     if entity_id == nil then
-      hit_end = true
       break
     end
 
@@ -219,19 +223,7 @@ function EntityManager.on_tick()
     end
   end
 
-  -- adjust entities_per_tick based on load (TODO: tweak this!)
-  if hit_end then
-    -- hit the end of the list before we hit the limit
-    ept = ept - 1
-    if processed_cnt < SERVICE_PER_TICK_MIN then
-      -- go down by 2 if we didn't even do the minimum
-      ept = ept - 1
-    end
-  else
-    -- still more to process
-    ept = ept + 1
-  end
-  global.entities_per_tick = math.max(SERVICE_PER_TICK_MIN, math.min(ept, SERVICE_PER_TICK_MAX))
+  ra.add_sample(processed_cnt)
 end
 
 function EntityManager.on_entity_created(event)

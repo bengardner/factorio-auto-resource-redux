@@ -26,15 +26,15 @@ local DeadlineQueue = {}
 
 --[[
 Add an item to the queue.
-
-@param key (string or number) is the unique key for the item
-@param val (table) is the value. Fields val._deadline and val._deadline_idx are added.
-@param deadline (number) is the absolute deadline for the entity
-@param wrap_index (boolean) if true, will place an out-of-bounds deadline in the last slot.
-    If false, an out-of-bounds deadline will not be added.
-@return whether the item was added to the queue
 ]]
-function DeadlineQueue._queue(self, key, val, deadline, wrap_index)
+---@param self table DeadlineQueue instance
+---@param key string|number the unique key for the item
+---@param val table is the value. Fields val._deadline and val._deadline_idx are added.
+---@param deadline number is the absolute deadline for the entity
+---@param wrap_index boolean if true, will place an out-of-bounds deadline in the last slot.
+---    If false, an out-of-bounds deadline will not be added.
+---@return boolean whether the item was added to the queue
+function DeadlineQueue._queue(self, key, value, deadline, wrap_index)
   -- calculate the relative slice number
   local rel_slice = math.max(0, math.floor(deadline / self.SLICE_TICKS) - self.cur_slice)
 
@@ -51,9 +51,9 @@ function DeadlineQueue._queue(self, key, val, deadline, wrap_index)
   local abs_index = 1 + (self.cur_index + rel_slice - 1) % self.SLICE_COUNT
 
   -- set the deadline field and add it to the queue
-  val._deadline = deadline
-  val._deadline_idx = abs_index
-  self[abs_index][key] = val
+  value._deadline = deadline
+  value._deadline_idx = abs_index
+  self[abs_index][key] = value
   return true
 end
 
@@ -63,8 +63,12 @@ Add an item to the queue.
 NOTE: Don't add an item that is already in the queue.
 If unsure, call DeadlineQueue.purge() first.
 ]]
-function DeadlineQueue.queue(self, key, val, deadline)
-  DeadlineQueue._queue(self, key, val, deadline, true)
+---@param self table DeadlineQueue instance
+---@param key string|number the unique key for the item
+---@param value table is the value. Fields val._deadline and val._deadline_idx are added.
+---@param deadline number is the absolute deadline for the entity
+function DeadlineQueue.queue(self, key, value, deadline)
+  DeadlineQueue._queue(self, key, value, deadline, true)
 end
 
 --[[
@@ -72,7 +76,12 @@ Add an item to the queue if the deadline isn't out of range.
 This allows using a more coarse DeadlineQueue if the deadline exceeds this one.
 Might be more efficient than re-queueing items with distant deadlines.
 ]]
-function DeadlineQueue.queue_maybe(self, key, val, deadline)
+---@param self table DeadlineQueue instance
+---@param key string|number the unique key for the item
+---@param value table is the value. Fields val._deadline and val._deadline_idx are added.
+---@param deadline number is the absolute deadline for the entity
+---@return boolean whether the item was added to the queue
+function DeadlineQueue.queue_maybe(self, key, value, deadline)
   return DeadlineQueue._queue(self, key, val, deadline, false)
 end
 
@@ -80,11 +89,10 @@ end
 Remove a key from the queue.
 If value isn't provided, this is relatively expensive, as it has to access all
 SLICE_COUNT queues.
-
-@param self  the value from DeadlineQueue.new()
-@param key   the unique key for the value
-@param value the value previously passed to the queue() function
 ]]
+---@param self table DeadlineQueue instance
+---@param key string|number the unique key for the item
+---@param value table is the value. Fields val._deadline and val._deadline_idx are added.
 function DeadlineQueue.purge(self, key, value)
   -- see if we have a record of adding this item to the queue
   if value ~= nil and value._deadline_idx ~= nil then
@@ -102,8 +110,9 @@ function DeadlineQueue.purge(self, key, value)
   end
 end
 
+---Advance to the next slice index.
+---@param self table DeadlineQueue instance
 local function advance_index(self)
-  -- advance to the next queue
   -- NOTE: cur_index is base 1, '%' is base 0, so there is an implicit +1
   self.cur_index = 1 + (self.cur_index % self.SLICE_COUNT)
   self.cur_slice = self.cur_slice + 1
@@ -117,6 +126,8 @@ have an expired deadline.
 
 returns key, value
 ]]
+---@param self table DeadlineQueue instance
+---@return string|number|nil, table|nil
 function DeadlineQueue.next(self)
   local now = game.tick
 
@@ -151,6 +162,8 @@ Grab any entries from the current slice.
 Specifically for supporting the Dual queue mode.
 The returned value may not have expired, but would expire in the current slice.
 ]]
+---@param self table DeadlineQueue instance
+---@return string|number|nil, table|nil
 function DeadlineQueue.next_coarse(self)
   local now = game.tick
 
@@ -180,6 +193,8 @@ function DeadlineQueue.next_coarse(self)
   -- not reachable
 end
 
+---@param self table # from DeadlineQueue.new()
+---@return number
 function DeadlineQueue.get_current_count(self)
   return table_size(self[self.cur_index])
 end
@@ -187,6 +202,9 @@ end
 --[[
 Create a new DeadlineQueue instance.
 ]]
+---@param slice_count number # width of each slice in ticks
+---@param slice_ticks number # number of slices in the queue
+---@return table # DeadlineQueue instance
 function DeadlineQueue.new(slice_count, slice_ticks)
   local inst = {
     SLICE_TICKS = slice_ticks,
