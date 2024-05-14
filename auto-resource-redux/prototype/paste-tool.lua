@@ -32,7 +32,8 @@ data:extend({ gen_paste_tool(
 
 local managed_entity_types = {}
 local managed_entity_names = {}
-for group_name, filter in pairs(EntityGroups.entity_group_filters) do
+for _, info in pairs(EntityGroups.entity_group_filters) do
+  local filter = info[2]
   if filter.filter == "type" then
     table.insert(managed_entity_types, filter.type)
   elseif filter.filter == "name" then
