@@ -16,7 +16,7 @@ local GUIDispatcher = require "src.GUIDispatcher"
 -- NOTE: a higher DEADLINE_QUEUE_TICKS wastes CPU, as we have to check if each entry has really expired.
 -- Maybe go with 4 and use next_coarse() to skip the checks? Can be optimized later.
 local DEADLINE_QUEUE_TICKS = 1
-local DEADLINE_QUEUE_COUNT = 200
+local DEADLINE_QUEUE_COUNT = 610
 -- these should be configurable, esp. the max, as that will impact UPS
 local SERVICE_PER_TICK_MIN = 20
 local SERVICE_PER_TICK_MAX = 80
