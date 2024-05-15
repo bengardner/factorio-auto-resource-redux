@@ -301,9 +301,10 @@ function EntityHandlers.handle_assembler(o, override_recipe, clear_inputs)
   local entity, storage = o.entity, o.storage
   local recipe = override_recipe or entity.get_recipe()
   if recipe == nil then
-    -- FIXME: check this entity on_gui_close to see if the recipe changed. re-queue on change.
+    o.data.old_recipe = nil
     return assembling_machine_period_max
   end
+  o.data.old_recipe = recipe.name
 
   -- get the cached max_multiplier based on the assembler and recipe
   local max_multiplier = GetRecipeInfo(recipe, entity, storage).max_multiplier
