@@ -463,40 +463,35 @@ function EntityHandlers.handle_lab(o)
   if o.paused then
     return service_period_max
   end
-  local old_status = o.entity.status
-  local pack_count_target = math.ceil(o.entity.speed_bonus) + 1
-  --[[
-  local prot = o.entity.prototype
-  log(("[%s] [%s] pct=%s speed=%s bonus=%s state=%s"):format(o.entity.unit_number, o.entity.name, pack_count_target,
-    prot.researching_speed,
-    o.entity.speed_bonus,
-    o.entity.status))
-  ]]
-  local lab_inv = o.entity.get_inventory(defines.inventory.lab_input)
-  local inserted = false
-  for i, item_name in ipairs(game.entity_prototypes[o.entity.name].lab_inputs) do
-    local amount_inserted = Storage.add_to_or_replace_stack(
+  -- if all else fails, we want to keep a few science packs stocked
+  local entity = o.entity
+  local prot = entity.prototype
+
+  -- base is one for current and one for next
+  local pack_count_target = 2
+
+  -- if we have current_research, we can make a better estimate
+  local cur_res = entity.force.current_research
+  if cur_res ~= nil then
+    local one_ticks = math.floor(cur_res.research_unit_energy / (prot.researching_speed + entity.speed_bonus))
+    if one_ticks > 0 then
+      pack_count_target = 1 + math.ceil(service_period_max / one_ticks)
+    end
+  end
+
+  local lab_inv = entity.get_inventory(defines.inventory.lab_input)
+
+  for i, item_name in ipairs(prot.lab_inputs) do
+    Storage.add_to_or_replace_stack(
       o.storage, item_name,
       lab_inv[i], pack_count_target,
       false, o.use_reserved
     )
-    inserted = inserted or (amount_inserted > 0)
   end
 
   insert_fuel(o, false)
 
-  -- tune the service period
-  local period = o.data.period or service_period_min
-  if inserted and old_status == defines.entity_status.missing_science_packs then
-    period = period / 2
-  elseif not inserted and old_status == defines.entity_status.working then
-    -- didn't add a science pack AND the lab is researching
-    period = period * 2
-  end
-  period = math.max(service_period_min, math.min(service_period_max, math.floor(period)))
-  o.data.period = period
-
-  return period
+  return service_period_max
 end
 
 -- FIXME: if a mining drill doesn't use fuel AND it doesn't output fluids, then
