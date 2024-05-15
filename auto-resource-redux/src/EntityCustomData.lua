@@ -6,6 +6,7 @@ local FurnaceRecipeManager = require "src.FurnaceRecipeManager"
 local GUIDispatcher = require "src.GUIDispatcher"
 local GUIRequesterTank = require "src.GUIRequesterTank"
 local Storage = require "src.Storage"
+local DeadlineQueue = require "src.DeadlineQueue"
 
 local DATA_TAG = "arr-data"
 
@@ -150,10 +151,27 @@ function EntityCustomData.set_data(entity_or_ghost, new_data)
 end
 
 function EntityCustomData.on_cloned(event)
+  local entity = event.destination
+  if entity == nil or not entity.valid or entity.unit_number == nil then
+    return
+  end
+  local unit_number = entity.unit_number
+  -- remove destination from the queue, as it will be re-added
+  local data = global.entity_data[unit_number]
+  if data ~= nil then
+    DeadlineQueue.purge(global.deadline_queue, unit_number, data)
+  end
+
   EntityCustomData.set_data(
     event.destination,
     flib_table.deep_copy(EntityCustomData.get_data(event.source))
   )
+
+  -- add the destination total the queue with a short deadline
+  data = global.entity_data[unit_number]
+  if data ~= nil then
+    DeadlineQueue.queue(global.deadline_queue, unit_number, data, game.tick + 30)
+  end
 end
 
 function EntityCustomData.on_settings_pasted(event)
