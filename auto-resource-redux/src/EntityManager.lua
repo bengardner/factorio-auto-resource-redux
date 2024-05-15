@@ -11,6 +11,7 @@ local Storage = require "src.Storage"
 local RunningAverage = require 'src.RunningAverage'
 local Util = require "src.Util"
 local Destroyer = require "src.Destroyer"
+local GUIDispatcher = require "src.GUIDispatcher"
 
 -- NOTE: a higher DEADLINE_QUEUE_TICKS wastes CPU, as we have to check if each entry has really expired.
 -- Maybe go with 4 and use next_coarse() to skip the checks? Can be optimized later.
@@ -321,5 +322,53 @@ function EntityManager.on_marked_for_upgrade(event)
     end
   end
 end
+
+local function on_gui_opened(event, tags, player)
+  if event.gui_type == defines.gui_type.entity then
+    local entity = event.entity
+    if entity and entity.valid and entity.unit_number then
+      local data = global.entity_data[entity.unit_number]
+      if data then
+        if entity.type == "assembling-machine" then
+          local recipe = entity.get_recipe()
+          if recipe ~= nil then
+            data.old_recipe = recipe.name
+          else
+            data.old_recipe = nil
+          end
+        end
+      end
+    end
+  end
+end
+
+local function on_gui_closed(event, tags, player)
+  if event.gui_type == defines.gui_type.entity then
+    local entity = event.entity
+    if entity and entity.valid and entity.unit_number then
+      local unit_number = entity.unit_number
+      local data = global.entity_data[unit_number]
+      if data then
+        if entity.type == "assembling-machine" then
+          local recipe = entity.get_recipe()
+          local changed = false
+          if recipe ~= nil and recipe.name ~= data.old_recipe then
+            changed = true
+          elseif recipe == nil and data.old_recipe ~= nil then
+            changed = true
+          end
+          if changed then
+            log("requeue")
+            DeadlineQueue.purge(global.deadline_queue, unit_number, data)
+            DeadlineQueue.queue(global.deadline_queue, unit_number, data, game.tick + 30)
+          end
+        end
+      end
+    end
+  end
+end
+
+GUIDispatcher.register(defines.events.on_gui_opened, nil, on_gui_opened)
+GUIDispatcher.register(defines.events.on_gui_closed, nil, on_gui_closed)
 
 return EntityManager
