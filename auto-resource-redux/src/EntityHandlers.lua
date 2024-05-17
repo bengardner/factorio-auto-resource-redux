@@ -147,30 +147,135 @@ end
 --- Inserts fuel into the first slot of an entity's fuel inventory using its priority set
 ---@param o table
 ---@param default_use_reserved boolean
--- @return boolean inserted
----@reutrn number of ticks until the next refuel
+---@reutrn number of ticks until the next refuel (always service_period_max)
 local function insert_fuel(o, default_use_reserved)
   local inventory = o.entity.get_fuel_inventory()
   if inventory and #inventory >= 1 then
-    return insert_using_priority_set(
+    insert_using_priority_set(
       o, ItemPriorityManager.get_fuel_key(o.entity.name),
       inventory[1], nil,
       default_use_reserved
     )
   end
-  return false
+  return service_period_max
 end
 
 -------------------------------------------------------------------------------
+
+local function GetRecipeInfo_Furnace(recipe, entity, asi)
+  local max_mult = 9999
+  local out_capacity = {} -- debug
+  local out_recipes = {}  -- debug
+
+  log(("GetRecipeInfo_Furnace(%s, %s)"):format(recipe.name, entity.name))
+  log((" - ing  = %s"):format(serpent.line(recipe.ingredients)))
+  log((" - prod = %s"):format(serpent.line(recipe.products)))
+
+  for _, prod in pairs(recipe.products) do
+    if prod.type == "item" then
+      local item_proto = game.item_prototypes[prod.name]
+      local n_inserted = item_proto.stack_size
+      out_capacity[prod.name] = n_inserted
+
+      local prod_amount
+      if prod.amount ~= nil then
+        prod_amount = prod.amount
+      else
+        prod_amount = prod.amount_max
+      end
+      if prod_amount > item_proto.stack_size then
+        prod_amount = item_proto.stack_size
+      end
+      local mult = n_inserted / prod_amount
+      max_mult = math.min(mult, max_mult)
+      out_recipes[prod.name] = mult
+
+    elseif prod.type == "fluid" then
+      log(("TODO: fluid"))
+      for i, fluid, filter, _ in Util.iter_fluidboxes(entity, "^", true) do
+        local proto = entity.fluidbox.get_prototype(i)
+        log((" - fbox i=%s fluid=%s filter=%s proto=%s pidx=%s vol=%s area=%s"):format(
+          i,
+          serpent.line(fluid),
+          serpent.line(filter),
+          proto,
+          proto.index,
+          proto.volume,
+          proto.area
+        ))
+        for k, b in pairs(proto) do
+          print(k, b.index, b.volume)
+        end
+      end
+      --[[
+      local fluid_proto = game.fluid_prototypes[prod.name]
+      -- TODO: find the fluidbox
+      out_capacity[prod.name] = n_inserted
+      local mult
+      if prod.amount ~= nil then
+        mult = n_inserted / prod.amount
+      else
+        mult = n_inserted / prod.amount_max
+      end
+      max_mult = math.min(mult, max_mult)
+      out_recipes[prod.name] = mult
+      ]]
+    end
+  end
+
+  local inp_capacity = {} -- debug
+  local inp_recipes = {}  -- debug
+  for _, ing in pairs(recipe.ingredients) do
+    if ing.type == "item" then
+      local item_proto = game.item_prototypes[ing.name]
+      local n_inserted = item_proto.stack_size * 2
+      inp_capacity[ing.name] = n_inserted
+
+      log((" - ing ss = %s"):format(n_inserted))
+
+      local mult = n_inserted / ing.amount
+      inp_recipes[ing.name] = mult
+      max_mult = math.min(mult, max_mult)
+
+    elseif ing.type == "fluid" then
+      -- TODO: find 'input' or 'input-output' fluid boxes with the filter
+      --[[
+      local n_inserted = entity.insert_fluid({ name=ing.name, amount=999999 })
+      inp_capacity[ing.name] = n_inserted
+      local mult = n_inserted / ing.amount
+      inp_recipes[ing.name] = mult
+      max_mult = math.min(mult, max_mult)
+      ]]
+    end
+  end
+
+  asi.max_multiplier = max_mult
+
+  -- DEBUG:
+  log((" - inp_cap = %s"):format(serpent.line(inp_capacity)))
+  log((" - inp_rec = %s"):format(serpent.line(inp_recipes)))
+  log((" - out_cap = %s"):format(serpent.line(out_capacity)))
+  log((" - out_rec = %s"):format(serpent.line(out_recipes)))
+  log((" - mult    = %s"):format(asi.max_multiplier))
+  return asi
+end
+
 --[[
 Determine the maximum recipe multiplier for this recipe that
 will fit in this assembler.
-I don't think this depends on beacons.
+This should not depend on beacons.
 
 Cached info is stored as:
-  global.recipe_info[recipe.name][assembler_name] = { max_multiplier=2 }
+  global.recipe_info[recipe.name][assembler_name] = {
+    item_multiplier=2,
+    fluid_multiplier=1,
+    max_multiplier=2
+  }
 
-TODO: figure out fluids!
+TODO: Split items from fluids as above!
+FIXME: this does not work on furnaces if they are crafting the wrong thing!
+  Assume 2 stack input and 1 stack output for furnaces if the results are zero?
+  Don't save it, though.
 ]]
 local function GetRecipeInfo(recipe, entity, storage)
   if global.recipe_info == nil then
@@ -188,6 +293,11 @@ local function GetRecipeInfo(recipe, entity, storage)
   end
 
   if next(asi) == nil then
+    if entity.type == "furnace" then
+      GetRecipeInfo_Furnace(recipe, entity, asi)
+      return asi
+    end
+    log(("Not a furnace: %s"):format(entity.type))
     local out_inventory = entity.get_inventory(defines.inventory.assembling_machine_output)
     local inp_inventory = entity.get_inventory(defines.inventory.assembling_machine_input)
     Storage.add_from_inventory(storage, out_inventory, true)
@@ -282,7 +392,10 @@ local function GetRecipeInfo(recipe, entity, storage)
     inp_inventory.clear()
     entity.clear_fluid_inside()
 
-    asi.max_multiplier = math.ceil(max_mult)
+    local mm = math.ceil(max_mult)
+    if mm > 0 then
+      asi.max_multiplier = mm
+    end
 
     -- DEBUG:
     log((" - inp_cap = %s"):format(serpent.line(inp_capacity)))
@@ -308,6 +421,9 @@ function EntityHandlers.handle_assembler(o, override_recipe, clear_inputs)
 
   -- get the cached max_multiplier based on the assembler and recipe
   local max_multiplier = GetRecipeInfo(recipe, entity, storage).max_multiplier
+  if not max_multiplier then
+    return assembling_machine_period_max
+  end
 
   -- always try to pick up outputs, even if disabled
   local output_inventory = entity.get_inventory(defines.inventory.assembling_machine_output)
@@ -326,7 +442,7 @@ function EntityHandlers.handle_assembler(o, override_recipe, clear_inputs)
 
   -- if we have any stuck outputs, then remove the inputs and wait for the max period
   if next(remaining_items) then
-    log(("[%s] %s r=%s output stuck"):format(entity.unit_number, entity.name, recipe.name))
+    --log(("[%s] %s r=%s output stuck"):format(entity.unit_number, entity.name, recipe.name))
     Storage.add_from_inventory(storage, input_inventory, false)
     return assembling_machine_period_max
   end
@@ -338,6 +454,11 @@ function EntityHandlers.handle_assembler(o, override_recipe, clear_inputs)
 
   local crafts_per_second = entity.crafting_speed / recipe.energy
   local ingredient_multiplier = math.min(max_multiplier, math.ceil(TARGET_INGREDIENT_CRAFT_TIME * crafts_per_second))
+
+  if ingredient_multiplier < 1 then
+    log(("  -- energy=%s crafting_speed=%s rt=%s mm=%s"):format(recipe.energy, entity.crafting_speed, recipe_ticks, max_multiplier))
+  end
+
   if clear_inputs then
     Storage.add_from_inventory(storage, input_inventory, true)
     store_fluids(storage, entity, nil, true)
@@ -422,12 +543,13 @@ Set timeout to handle the number of recipes. (Service when recipes should be don
 
   -- local contents = input_inventory.get_contents()
 
-  local period = math.min(math.floor(ingredient_multiplier * recipe_ticks), assembling_machine_period_max)
+  local period = Util.clamp(math.floor(ingredient_multiplier * recipe_ticks),
+    assembling_machine_period_min, assembling_machine_period_max)
+  --local period = math.max(math.min(, assembling_machine_period_max)
 
-  log(("[%s] %s r=%s mult=%s period=%s"):format(entity.unit_number, entity.name, recipe.name, ingredient_multiplier,
-    period))
+  --log(("[%s] %s r=%s mult=%s period=%s"):format(entity.unit_number, entity.name, recipe.name, ingredient_multiplier, period))
 
-  inserted = insert_fluids(o, fluid_targets) or inserted
+  insert_fluids(o, fluid_targets)
   --return inserted
   if entity.status == defines.entity_status.working then
     return period
@@ -459,11 +581,17 @@ function EntityHandlers.handle_rocket_silo(o)
   return service_period_max
 end
 
+--[[
+Labs are always serviced at the maximum interval.
+We stock enough science packs to last the whole time.
+We could go longer than the maximum interval in early game, as it can take 30+
+seconds for one science pack cycle.
+]]
 function EntityHandlers.handle_lab(o)
   if o.paused then
     return service_period_max
   end
-  -- if all else fails, we want to keep a few science packs stocked
+
   local entity = o.entity
   local prot = entity.prototype
 
@@ -473,6 +601,7 @@ function EntityHandlers.handle_lab(o)
   -- if we have current_research, we can make a better estimate
   local cur_res = entity.force.current_research
   if cur_res ~= nil then
+    -- calculate the number of ticks for one complete cycle
     local one_ticks = math.floor(cur_res.research_unit_energy / (prot.researching_speed + entity.speed_bonus))
     if one_ticks > 0 then
       pack_count_target = 1 + math.ceil(service_period_max / one_ticks)
@@ -500,6 +629,10 @@ function EntityHandlers.handle_mining_drill(o)
   if o.paused then
     return service_period_max
   end
+
+  -- TODO: if this doesn't take fuel AND it does not need or produce fluid, then
+  --       we can stop servicing it.
+
   insert_fuel(o, false)
   if #o.entity.fluidbox > 0 then
     -- there is no easy way to know what fluid a miner wants, the fluid is a property of the ore's prototype
@@ -510,6 +643,7 @@ function EntityHandlers.handle_mining_drill(o)
   return service_period_max
 end
 
+-- Generic refuel-only handler
 function EntityHandlers.handle_boiler(o)
   if o.paused then
     return false
@@ -517,6 +651,7 @@ function EntityHandlers.handle_boiler(o)
   return insert_fuel(o, true)
 end
 
+-- Generic refuel-only handler
 function EntityHandlers.handle_burner_generator(o)
   if o.paused then
     return false
@@ -760,6 +895,7 @@ local function populate_ghost(o, is_entity)
     return 10*60
   end
 
+  log(("Trying to revive %s @ %s"):format(entity.name, serpent.line(entity.position)))
   local _, revived_entity, __ = entity.revive{raise_revive = true}
   if revived_entity ~= nil then
     if old_unum ~= nil then
@@ -773,8 +909,33 @@ local function populate_ghost(o, is_entity)
     return 10*60
   end
 
+  local period = service_period_max
+
+  if is_entity then
+    -- instantly deconstruct anything that should be deconstructed
+    local ents = entity.surface.find_entities_filtered({ area=entity.bounding_box, to_be_deconstructed=true })
+    local to_mine = {}
+    for _, eee in ipairs(ents) do
+      if eee.prototype.mineable_properties.minable then
+        table.insert(to_mine, eee)
+      end
+    end
+
+    if #to_mine > 0 then
+      local inv = game.create_inventory(16)
+      for _, eee in ipairs(to_mine) do
+        eee.mine({ inventory=inv })
+        period = service_period_min
+      end
+      for name, count in pairs(inv.get_contents()) do
+        Storage.add_item_or_fluid(o.storage, name, count, true, nil)
+      end
+      inv.destroy()
+    end
+  end
+
   -- failed: likely blocked, try again later
-  return 10*60
+  return period
 end
 
 function EntityHandlers.handle_entity_ghost(o)
