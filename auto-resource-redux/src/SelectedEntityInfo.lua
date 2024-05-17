@@ -123,6 +123,15 @@ local function update_player_selected(player)
     --style = "bordered_table"
   }
 
+  tt.add {
+    type="label",
+    caption = "[font=default-bold]Position[/font]",
+  }
+  tt.add {
+    type="label",
+    caption = serpent.line(entity.position),
+  }
+
   local queue_key = EntityGroups.names_to_groups[entity.name]
   if queue_key then
     tt.add {
