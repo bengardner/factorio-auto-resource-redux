@@ -105,7 +105,7 @@ function DeadlineQueue.purge(self, key, value)
   end
 
   -- brute force it
-  for qq in ipairs(self) do
+  for _, qq in ipairs(self) do
     qq[key] = nil
   end
 end

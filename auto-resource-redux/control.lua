@@ -91,6 +91,7 @@ script.on_event(defines.events.on_robot_mined_entity, EntityManager.on_entity_re
 script.on_event(defines.events.script_raised_destroy, EntityManager.on_entity_removed)
 script.on_event(defines.events.on_entity_died, EntityManager.on_entity_died)
 script.on_event(defines.events.on_marked_for_deconstruction, EntityManager.on_marked_for_deconstruction)
+script.on_event(defines.events.on_post_entity_died, EntityManager.on_post_entity_died)
 
 
 script.on_event(defines.events.on_marked_for_upgrade, EntityManager.on_marked_for_upgrade)

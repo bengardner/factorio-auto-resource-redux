@@ -313,6 +313,12 @@ function EntityManager.on_marked_for_deconstruction(event)
   end
 end
 
+function EntityManager.on_post_entity_died(event)
+  if event.ghost ~= nil then
+    manage_entity(event.ghost, false)
+  end
+end
+
 function EntityManager.on_marked_for_upgrade(event)
   local entity = event.entity
   if entity ~= nil and entity.valid and entity.unit_number ~= nil and event.player_index ~= nil then
