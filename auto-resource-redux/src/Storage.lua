@@ -448,6 +448,12 @@ function Storage.count_available_fluid_in_temperature_range(storage, storage_key
   return total
 end
 
+--- Add fluid to the storage.
+---@param storage table
+---@param fluid Fluid
+---@param ignore_limit boolean
+---@return remaining_fluid Fluid the Fluid that was not added
+---@return amount_added number the fluid amount that was added to the storage
 function Storage.add_fluid(storage, fluid, ignore_limit)
   local amount_added = add_item_or_fluid(
     storage,
