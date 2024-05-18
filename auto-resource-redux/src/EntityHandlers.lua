@@ -895,7 +895,7 @@ local function populate_ghost(o, is_entity)
     return 10*60
   end
 
-  log(("Trying to revive %s @ %s"):format(entity.name, serpent.line(entity.position)))
+  log(("Trying to revive %s @ %s"):format(entity.ghost_name, serpent.line(entity.position)))
   local _, revived_entity, __ = entity.revive{raise_revive = true}
   if revived_entity ~= nil then
     if old_unum ~= nil then
@@ -906,7 +906,7 @@ local function populate_ghost(o, is_entity)
     for _, ing in ipairs(item_list) do
       Storage.remove_item(o.storage, ing.name, ing.count, true)
     end
-    return 10*60
+    return -1
   end
 
   local period = service_period_max
@@ -918,6 +918,10 @@ local function populate_ghost(o, is_entity)
     for _, eee in ipairs(ents) do
       if eee.prototype.mineable_properties.minable then
         table.insert(to_mine, eee)
+      else
+        --log(("%s %s is blocking @ %s : %s"):format(eee.name, eee.type, serpent.line(eee.position), entity.ghost_name))
+        Destroyer.queue_destruction(eee, entity.force)
+        period = 120
       end
     end
 

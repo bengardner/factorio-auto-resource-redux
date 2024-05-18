@@ -24,7 +24,6 @@ end
 
 -- queue the entity for destruction in a few seconds
 function Destroyer.queue_destruction(entity, force)
-
   local qq
 
   if entity.type == "cliff" and entity.prototype.cliff_explosive_prototype ~= nil then
@@ -35,7 +34,7 @@ function Destroyer.queue_destruction(entity, force)
 
   else
     log(("Destroyer: don't know what to do with %s %s"):format(entity.name, entity.type))
-      return
+    return
   end
   log(("queue_destruction: %s %s @ %s force=%s by force=%s"):format(entity.name, entity.type, serpent.line(entity.position),
     entity.force.name, force.name))
@@ -79,46 +78,96 @@ function Destroyer.process_mine_queue()
   end
 end
 
+--- Create the appropriate explosive entity to destroy the cliff.
+---@param entity LuaEntity the cliff to destroy
+---@param force LuaForce the force doing the destroying
+---@return boolean created whether the explosive was created
+function Destroyer.destroy_cliff(entity, force)
+  if entity == nil or force == nil or not entity.valid then
+    return false
+  end
+
+  local exp_name = entity.prototype.cliff_explosive_prototype
+  if exp_name ~= nil then
+    local storage = Storage.get_storage_for_force(entity, force.name)
+    local xxx = Storage.remove_item(storage, exp_name, 1, true)
+    if xxx > 0 then
+      log(("blasting cliff with %s @ %s"):format(exp_name, serpent.line(entity.position)))
+      entity.surface.create_entity({
+        name=exp_name,
+        position=entity.position,
+        force=force,
+        target=entity.position,
+        speed=1})
+        return true
+    end
+  end
+  return false
+end
+
+--- Check if @pos overlaps any position in @pos_arr.
+---@param pos_arr MapPosition[]
+---@param pos MapPosition
+---@param min_dist number dx/dy limit
+local function pos_overlap(pos_arr, pos, min_dist)
+  for _, pp in ipairs(pos_arr) do
+    local dx = math.abs(pos.x - pp.x)
+    local dy = math.abs(pos.y - pp.y)
+    if dx <= min_dist and dy <= min_dist then
+      return true
+    end
+  end
+  return false
+end
+
 --[[
 global.mod.mine_queue contains items that are waiting to be mined.
-This steps through them and mines up to 1000 of them in one go.
+This steps through them and mines up to 100 of them in one go.
 ]]
 function Destroyer.process_cliff_queue()
   local qq = global.destroyer.cliff_queue
   local now = game.tick
+  local left = 100
 
-  -- try killing cliffs, one per cycle
+  -- list of positions where an explosive has been spawned in this cycle
+  local pos_arr = {}
+
+  -- try killing cliffs
   for key, val in pairs(qq) do
     local ent = val[1]
-    if ent.valid and ent.to_be_deconstructed() then
-      if now >= val[2] then
-        local exp_name = ent.prototype.cliff_explosive_prototype
-        if exp_name ~= nil then
-          local force = val[3]
-          if force == nil then
-            qq[key] = nil
-          else
-            local storage = Storage.get_storage_for_force(ent, force.name)
-            local xxx = Storage.remove_item(storage, exp_name, 1, true)
-            if xxx > 0 then
-              log(("blasting cliff with %s @ %s"):format(exp_name, serpent.line(ent.position)))
-              ent.surface.create_entity({
-                name=exp_name,
-                position=ent.position,
-                force=ent.force,
-                target=ent.position,
-                speed=1})
-              break
-            end
-          end
-        else
-          val[2] = now + 180
+    local ticks = val[2]
+    local force = val[3]
+
+    if not (ent.valid and ent.to_be_deconstructed() and force ~= nil and force.valid) then
+      -- no longer scheduled for deletion or already gone or no force
+      qq[key] = nil
+      goto continue
+    end
+
+    -- check if it is time to remove
+    if now < ticks then
+      goto continue
+    end
+
+    local exp_name = ent.prototype.cliff_explosive_prototype
+    if exp_name == nil then
+      -- can't destroy; no explosive defined
+      qq[key] = nil
+      goto continue
+    end
+
+    -- spawn an explosive if we aren't too close to another on this cycle
+    -- the distance of 6 should be derived from the explosive, but whatever.
+    if not pos_overlap(pos_arr, ent.position, 6) then
+      table.insert(pos_arr, ent.position)
+      if Destroyer.destroy_cliff(ent, force) then
+        left = left - 1
+        if left == 0 then
+          return
         end
       end
-    else
-      -- no longer scheduled for deletion or already gone
-      qq[key] = nil
     end
+    ::continue::
   end
 end
 
@@ -184,7 +233,7 @@ function Destroyer.process_upgrade_queue()
         raise_built = true,
         create_build_effect_smoke = true,
       })
-      if new_ent ~= nil then        
+      if new_ent ~= nil then
         global.entities[old_unum] = nil
         Storage.remove_item(storage, upgrade_prot.name, 1, true)
         log(("Upgraded %s to %s @ %s"):format(old_name, new_ent.name, serpent.line(new_ent.position)))
