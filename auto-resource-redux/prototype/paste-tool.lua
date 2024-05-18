@@ -34,14 +34,17 @@ local managed_entity_types = {}
 local managed_entity_names = {}
 for _, info in pairs(EntityGroups.entity_group_filters) do
   local filter = info[2]
-  if filter.filter == "type" then
-    table.insert(managed_entity_types, filter.type)
-  elseif filter.filter == "name" then
-    if filter.name ~= "arr-hidden-sink-chest" then
-      table.insert(managed_entity_names, filter.name)
+  local modsrc = info[3]
+  if modsrc == nil or mods[modsrc] ~= nil then
+    if filter.filter == "type" then
+      table.insert(managed_entity_types, filter.type)
+    elseif filter.filter == "name" then
+      if filter.name ~= "arr-hidden-sink-chest" then
+        table.insert(managed_entity_names, filter.name)
+      end
+    else
+      assert(false, "FIXME: Cannot determine selection tool filters: unknown entity filter in EntityGroups.lua!")
     end
-  else
-    assert(false, "FIXME: Cannot determine selection tool filters: unknown entity filter in EntityGroups.lua!")
   end
 end
 data:extend({ gen_paste_tool(
