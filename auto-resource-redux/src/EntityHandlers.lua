@@ -432,7 +432,7 @@ function EntityHandlers.handle_assembler(o, override_recipe, clear_inputs)
   -- REVISIT: is this still true?
   -- TODO: we're storing all fluids here, so a recipe that has the same input and output fluid
   -- might get stuck as the output will be stored first
-  Util.dictionary_merge(remaining_items, store_fluids(storage, entity))
+  Util.dictionary_merge(remaining_items, store_fluids(storage, entity, "^output"))
 
   if o.paused then
     return assembling_machine_period_max
