@@ -44,21 +44,32 @@ local function default_storage(domain_key)
   }
 end
 
+local i_am_a_cheat = true
+
 function Storage.get_storage(entity)
   local storage = DomainStore.get_subdomain(DomainStore.get_domain_key(entity), "storage", default_storage)
   storage.last_entity = entity
+  if storage.force_name == nil then
+    storage.force_name = entity.force.name
+  end
   return storage
 end
 
 function Storage.get_storage_for_surface(surface_id, entity)
   local storage = DomainStore.get_subdomain(DomainStore.get_domain_key_raw(surface_id, entity.force.name), "storage", default_storage)
   storage.last_entity = entity
+  if storage.force_name == nil then
+    storage.force_name = entity.force.name
+  end
   return storage
 end
 
 function Storage.get_storage_for_force(entity, force_name)
   local storage = DomainStore.get_subdomain(DomainStore.get_domain_key_raw(entity.surface.index, force_name), "storage", default_storage)
   storage.last_entity = entity
+  if storage.force_name == nil then
+    storage.force_name = force_name
+  end
   return storage
 end
 
@@ -191,6 +202,41 @@ function Storage.get_item_reservation(storage, storage_key)
   return storage.reservations[storage_key] or 0
 end
 
+local function cheat_item_count(storage, item_name)
+  if i_am_a_cheat and storage.force_name ~= nil then
+    local force = game.forces[storage.force_name]
+    if force ~= nil then
+      local num = force.item_production_statistics.get_input_count(item_name)
+      if num ~= nil then
+        return num
+      end
+    end
+  end
+  return 0
+end
+
+local function cheat_fluid_count(storage, storage_key)
+  if i_am_a_cheat and storage.force_name ~= nil then
+    local force = game.forces[storage.force_name]
+    if force ~= nil then
+      local fluid_name = Storage.unpack_fluid_item_name(storage_key)
+      local num = force.fluid_production_statistics.get_input_count(fluid_name)
+      if num ~= nil then
+        return num
+      end
+    end
+  end
+  return 0
+end
+
+local function get_item_count(storage, item_name)
+  return math.max(storage.items[item_name] or 0, cheat_item_count(storage, item_name))
+end
+
+local function get_item_reservation(storage, item_name)
+  return storage.reservations[storage_key] or 0
+end
+
 --- Counts the available quantity of an item, taking the reservation into account
 ---@param storage table
 ---@param storage_key string
@@ -199,9 +245,8 @@ end
 ---@return integer amount_available The amount that is available to be removed from the storage
 ---@return integer amount_stored The total amount stored
 function Storage.get_available_item_count(storage, storage_key, amount_requested, use_reserved)
-  local amount_stored = storage.items[storage_key] or 0
-  local amount_reserved = storage.reservations[storage_key] or 0
   -- make sure reservation works by automatically marking up to a stack of the item as reserved
+  --[[ REVISIT: I don't think this is really wanted.
   if storage.last_entity ~= nil and storage.last_entity.valid then
     if use_reserved and storage.items[storage_key] and amount_reserved <= 0 and not storage.last_entity.is_player() then
       local fluid_name = Storage.unpack_fluid_item_name(storage_key)
@@ -210,14 +255,18 @@ function Storage.get_available_item_count(storage, storage_key, amount_requested
       Storage.set_item_limit_and_reservation(storage, storage_key, storage.last_entity, nil, amount_reserved)
     end
   end
+  ]]
+  local amount_stored = get_item_count(storage, storage_key)
   if use_reserved then
     return math.min(amount_requested, amount_stored), amount_stored
   end
+  local amount_reserved = get_item_reservation(storage, storage_key)
   return Util.clamp(amount_stored - amount_reserved, 0, amount_requested), amount_stored
 end
 
 local get_available_item_count = Storage.get_available_item_count
 
+--[[
 function Storage.filter_items(storage, storage_keys, min_qty, use_qty_from_filters)
   local found_items = {}
   min_qty = min_qty or 0
@@ -233,13 +282,17 @@ function Storage.filter_items(storage, storage_keys, min_qty, use_qty_from_filte
   end
   return found_items
 end
+]]
 
 local function get_item_or_fluid_count(storage, item_or_fluid_name, temperature)
   local amount_stored = storage.items[item_or_fluid_name]
   if temperature then
     item_or_fluid_name = Storage.get_fluid_storage_key(item_or_fluid_name)
     temperature = math.floor(temperature)
-    amount_stored = (storage.items[item_or_fluid_name] or {})[temperature]
+    amount_stored = ((storage.items[item_or_fluid_name] or {})[temperature]) or 0
+    amount_stored = math.max(amount_stored, cheat_fluid_count(storage, item_or_fluid_name))
+  else
+    amount_stored = math.max(amount_stored, cheat_item_count(storage, item_or_fluid_name))
   end
   return amount_stored, item_or_fluid_name
 end
