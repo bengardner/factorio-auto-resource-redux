@@ -2,7 +2,7 @@
 local sink_tank = table.deepcopy(data.raw["storage-tank"]["storage-tank"])
 sink_tank.name = "arr-sink-tank"
 sink_tank.minable.result = "arr-sink-tank"
-sink_tank.fast_replaceable_group = nil
+sink_tank.fast_replaceable_group = "arr-tank"
 sink_tank.corpse = "pipe-to-ground-remnants"
 sink_tank.collision_box = { { -0.5, -0.5 }, { 0.5, 0.5 } }
 sink_tank.selection_box = { { -0.5, -0.5 }, { 0.5, 0.5 } }
