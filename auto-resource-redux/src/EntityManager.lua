@@ -76,7 +76,7 @@ local function handle_entity(entity, cache_table)
   -- queue for destruction if marked as such
   if entity.to_be_deconstructed() then
     Destroyer.queue_destruction(entity, entity.force)
-    return service_period_max
+    return 10*60
   end
 
   local entity_data = global.entity_data[entity.unit_number] or {}
