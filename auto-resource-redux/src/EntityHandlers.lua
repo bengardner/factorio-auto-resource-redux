@@ -704,6 +704,24 @@ function EntityHandlers.handle_car(o, ammo_inventory_id)
       ) or busy
     end
   end
+
+  if o.data.collect_inv == nil then
+    -- special support for vehicle-miner
+    if string.find(o.entity.name, "-miner") ~= nil then
+      log(("determinging collect inv for %s == true"):format(o.entity.name))
+      o.data.collect_inv = true
+    else
+      log(("determinging collect inv for %s == false"):format(o.entity.name))
+      o.data.collect_inv = false
+    end
+  end
+
+  if o.data.collect_inv == true then
+    local trunk_inv = o.entity.get_output_inventory()
+    if trunk_inv then
+      Storage.add_from_inventory(o.storage, trunk_inv, false)
+    end
+  end
   return busy
 end
 
