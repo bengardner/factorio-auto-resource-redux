@@ -11,6 +11,7 @@ local LogisticManager = require "src.LogisticManager"
 local Storage = require "src.Storage"
 local FluidBoxScan = require "src.FluidBoxScan"
 local Util = require "src.Util"
+local util = require "util" -- Core/LubLib/util
 local Destroyer = require "src.Destroyer"
 
 -- FIXME: these should be global and/or configurable
@@ -162,6 +163,11 @@ end
 
 -------------------------------------------------------------------------------
 
+--[[
+Get the maxumum recipe multiplier for items for a furnace.
+Fluids are intentionally ignored.
+They will be drained and filled on each service if nothing is connected to them.
+]]
 local function GetRecipeInfo_Furnace(recipe, entity, asi)
   local max_mult = 9999
   local out_capacity = {} -- debug
@@ -189,37 +195,6 @@ local function GetRecipeInfo_Furnace(recipe, entity, asi)
       local mult = n_inserted / prod_amount
       max_mult = math.min(mult, max_mult)
       out_recipes[prod.name] = mult
-
-    elseif prod.type == "fluid" then
-      log(("TODO: fluid"))
-      for i, fluid, filter, _ in Util.iter_fluidboxes(entity, "^", true) do
-        local proto = entity.fluidbox.get_prototype(i)
-        log((" - fbox i=%s fluid=%s filter=%s proto=%s pidx=%s vol=%s area=%s"):format(
-          i,
-          serpent.line(fluid),
-          serpent.line(filter),
-          proto,
-          proto.index,
-          proto.volume,
-          proto.area
-        ))
-        for k, b in pairs(proto) do
-          print(k, b.index, b.volume)
-        end
-      end
-      --[[
-      local fluid_proto = game.fluid_prototypes[prod.name]
-      -- TODO: find the fluidbox
-      out_capacity[prod.name] = n_inserted
-      local mult
-      if prod.amount ~= nil then
-        mult = n_inserted / prod.amount
-      else
-        mult = n_inserted / prod.amount_max
-      end
-      max_mult = math.min(mult, max_mult)
-      out_recipes[prod.name] = mult
-      ]]
     end
   end
 
@@ -236,16 +211,6 @@ local function GetRecipeInfo_Furnace(recipe, entity, asi)
       local mult = n_inserted / ing.amount
       inp_recipes[ing.name] = mult
       max_mult = math.min(mult, max_mult)
-
-    elseif ing.type == "fluid" then
-      -- TODO: find 'input' or 'input-output' fluid boxes with the filter
-      --[[
-      local n_inserted = entity.insert_fluid({ name=ing.name, amount=999999 })
-      inp_capacity[ing.name] = n_inserted
-      local mult = n_inserted / ing.amount
-      inp_recipes[ing.name] = mult
-      max_mult = math.min(mult, max_mult)
-      ]]
     end
   end
 
@@ -419,9 +384,14 @@ function EntityHandlers.handle_assembler(o, override_recipe, clear_inputs)
   end
   o.data.old_recipe = recipe.name
 
+  local extra_debug = false -- recipe ~= nil and recipe.name == 'ei_sand'
+
   -- get the cached max_multiplier based on the assembler and recipe
   local max_multiplier = GetRecipeInfo(recipe, entity, storage).max_multiplier
   if not max_multiplier then
+    if extra_debug then
+      log(" - no max mult")
+    end
     return assembling_machine_period_max
   end
 
@@ -429,20 +399,52 @@ function EntityHandlers.handle_assembler(o, override_recipe, clear_inputs)
   local output_inventory = entity.get_inventory(defines.inventory.assembling_machine_output)
   local _, remaining_items = Storage.add_from_inventory(storage, output_inventory, false)
 
+  --[[
+    Need to identify the fluidbox used for fuel, if any.
+    Don't drain that one. Only drain the ones that are labeled 'output'.
+    'input-output' is reserved for inputs or fuel.
+    'input' is ingredients. It will get flushed on recipe change.
+  ]]
+
+  -- FIXME: this is broken -- need to only store fluids that are outputs from the
   -- REVISIT: is this still true?
   -- TODO: we're storing all fluids here, so a recipe that has the same input and output fluid
   -- might get stuck as the output will be stored first
   Util.dictionary_merge(remaining_items, store_fluids(storage, entity, "^output"))
 
   if o.paused then
+    if extra_debug then
+      log(" - paused")
+    end
     return assembling_machine_period_max
   end
 
   local input_inventory = entity.get_inventory(defines.inventory.assembling_machine_input)
 
+
   -- if we have any stuck outputs, then remove the inputs and wait for the max period
-  if next(remaining_items) then
-    --log(("[%s] %s r=%s output stuck"):format(entity.unit_number, entity.name, recipe.name))
+  if next(remaining_items) ~= nil then
+    if extra_debug then
+      log(("[%s] %s r=%s output stuck: %s"):format(entity.unit_number, entity.name, recipe.name, serpent.line(remaining_items)))
+      for i, fluid, filter, proto in Util.iter_fluidboxes(entity, "^", false) do
+        log(("[%s] fluid=%s filter=%s type=%s"):format(i, serpent.line(fluid), serpent.line(filter), proto.production_type))
+      end
+      if entity.prototype.fluid_energy_source_prototype ~= nil then
+        log((" - has fluid_energy_source_prototype"))
+        local fb = entity.prototype.fluid_energy_source_prototype.fluid_box
+        local ff = fb.filter
+        if ff ~= nil then
+          log((" - fluid_box [%s] filter = %s"):format(fb.index, serpent.line(ff.name)))
+        end
+      end
+--[[
+1802.873 Script @__auto-resource-redux__/src/EntityHandlers.lua:457: [2304] ei_steam-crusher r=ei_sand output stuck: {["fluid;steam"] = 0.99456292949358271}
+1802.873 Script @__auto-resource-redux__/src/EntityHandlers.lua:459: [1] fluid={amount = 0.99456292949358271, name = "steam", temperature = 165} filter={maximum_temperature = 1000, minimum_temperature = 15, name = "steam"} type=input-output
+1802.873 Script @__auto-resource-redux__/src/EntityHandlers.lua:462:  - has fluid_energy_source_prototype
+1802.873 Script @__auto-resource-redux__/src/EntityHandlers.lua:466:  - fluid_box filter = "steam"
+
+]]
+    end
     Storage.add_from_inventory(storage, input_inventory, false)
     return assembling_machine_period_max
   end
@@ -455,7 +457,7 @@ function EntityHandlers.handle_assembler(o, override_recipe, clear_inputs)
   local crafts_per_second = entity.crafting_speed / recipe.energy
   local ingredient_multiplier = math.min(max_multiplier, math.ceil(TARGET_INGREDIENT_CRAFT_TIME * crafts_per_second))
 
-  if ingredient_multiplier < 1 then
+  if ingredient_multiplier < 1 or extra_debug then
     log(("  -- energy=%s crafting_speed=%s rt=%s mm=%s"):format(recipe.energy, entity.crafting_speed, recipe_ticks, max_multiplier))
   end
 
@@ -492,7 +494,9 @@ function EntityHandlers.handle_assembler(o, override_recipe, clear_inputs)
     local craftable_ratio = math.floor((storage_amount + (input_items[storage_key] or 0)) / math.ceil(ingredient.amount))
 
 
-    --log(("[%s] %s t=%s amt=%s cr=%s sa=%s mp=%s"):format(entity.unit_number, entity.name, storage_key, ingredient.amount, craftable_ratio, storage_amount, max_period))
+    if extra_debug then
+      log(("[%s] %s t=%s amt=%s cr=%s sa=%s mp=%s"):format(entity.unit_number, entity.name, storage_key, ingredient.amount, craftable_ratio, storage_amount, max_period))
+    end
 
     ingredient_multiplier = Util.clamp(craftable_ratio, 1, ingredient_multiplier)
   end
@@ -547,7 +551,9 @@ Set timeout to handle the number of recipes. (Service when recipes should be don
     assembling_machine_period_min, assembling_machine_period_max)
   --local period = math.max(math.min(, assembling_machine_period_max)
 
-  --log(("[%s] %s r=%s mult=%s period=%s"):format(entity.unit_number, entity.name, recipe.name, ingredient_multiplier, period))
+  if extra_debug then
+    log(("[%s] %s r=%s mult=%s"):format(entity.unit_number, entity.name, recipe.name, ingredient_multiplier))
+  end
 
   insert_fluids(o, fluid_targets)
   --return inserted

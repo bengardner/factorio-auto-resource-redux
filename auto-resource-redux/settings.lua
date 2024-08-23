@@ -8,4 +8,10 @@ data:extend({
     setting_type = "startup",
     default_value = false,
   },
+  {
+    name = "auto-resource-redux-no-resource",
+    type = "bool-setting",
+    setting_type = "runtime-global",
+    default_value = false,
+  },
 })

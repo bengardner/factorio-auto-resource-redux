@@ -1,3 +1,16 @@
+--[[
+Handles delayed mining, cliff destruction, and upgrades.
+
+REVISIT: could use the DeadlineQueue here with a unified data structure.
+{
+  type = "upgrade" | "mine" | "cliff",
+  entity = entity,
+  force = force,
+}
+
+Of course, ent.to_be_deconstructed() and entity.to_be_upgraded() and entity.type would
+eliminate the need for the 'type' field, but best to be clear.
+]]
 local Destroyer = {}
 
 local Storage = require "src.Storage"

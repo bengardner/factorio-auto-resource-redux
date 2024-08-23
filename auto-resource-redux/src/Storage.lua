@@ -1,6 +1,6 @@
 local Storage = {}
 local DomainStore = require "src.DomainStore"
-local ItemPriorityManager = require "src.ItemPriorityManager"
+--local ItemPriorityManager = require "src.ItemPriorityManager"
 local R = require "src.RichText"
 local Util = require "src.Util"
 
@@ -44,7 +44,7 @@ local function default_storage(domain_key)
   }
 end
 
-local i_am_a_cheat = true
+local i_am_a_cheat = false
 
 function Storage.get_storage(entity)
   local storage = DomainStore.get_subdomain(DomainStore.get_domain_key(entity), "storage", default_storage)
@@ -73,7 +73,66 @@ function Storage.get_storage_for_force(entity, force_name)
   return storage
 end
 
+local resource_names = {}  -- key=name, val=true
+
+-- TODO: handle on_runtime_mod_setting_changed
+local function update_settings()
+  global.opt_no_resource = settings.global["auto-resource-redux-no-resource"].value
+  if global.opt_no_resource then
+    for name, _ in pairs(resource_names) do
+      blacklisted_items[name] = true
+    end
+  else
+    for name, _ in pairs(resource_names) do
+      blacklisted_items[name] = nil
+    end
+  end
+end
+
+function Storage.on_runtime_mod_setting_changed(event)
+  log(("setting: %s changed"):format(event.setting))
+  if event.setting == "auto-resource-redux-no-resource" then
+    update_settings()
+  end
+end
+
 function Storage.initialise()
+  -- map 'resource' entities
+  for name, prot in pairs(game.entity_prototypes) do
+    if prot.type == "resource" then
+      local mproda = prot.mineable_properties.products
+      if mproda ~= nil then
+        for _, prod in ipairs(mproda) do
+          local pname = prod.name
+          if prod.type == "fluid" then
+            pname = Storage.get_fluid_storage_key(pname)
+          end
+          resource_names[pname] = true
+        end
+      end
+      --[[
+      if type(prot.mineable_properties.results) == "table" then
+        for _, res in ipairs(prot.minable.results) do
+          if res.name ~= nil then
+            if res.type == "fluid" then
+              resource_names[Storage.get_fluid_storage_key(res.name)] = true
+            else
+              resource_names[res.name] = true
+            end
+          end
+        end
+
+      elseif type(prot.minable.result) == "string" then
+        resource_names[prot.minable.result] = true
+
+      end
+      ]]
+    end
+  end
+  log(("resources: %s"):format(serpent.line(resource_names)))
+
+  update_settings()
+
   for name, item in pairs(game.item_prototypes) do
     if (item.type == "armor" and item.equipment_grid) or item.type == "item-with-entity-data" then
       decomposable_items[name] = true
@@ -84,6 +143,8 @@ function Storage.initialise()
       blacklisted_items[name] = true
     end
   end
+
+  log(("blacklisted: %s"):format(serpent.line(blacklisted_items)))
 
   -- Delete non-existent items
   for domain_name, _ in pairs(global.domains) do
@@ -111,7 +172,7 @@ end
 ---@param entity LuaEntity
 ---@param new_value integer
 local function print_setting_changed_info(setting_name, storage_key, entity, new_value)
-  local reason = ""
+  local reason
   if entity.is_player() then
     reason = ("(requested by %s)"):format(R.get_coloured_text(entity.chat_color, entity.name))
   else
@@ -285,7 +346,7 @@ end
 ]]
 
 local function get_item_or_fluid_count(storage, item_or_fluid_name, temperature)
-  local amount_stored = storage.items[item_or_fluid_name]
+  local amount_stored = storage.items[item_or_fluid_name] or 0
   if temperature then
     item_or_fluid_name = Storage.get_fluid_storage_key(item_or_fluid_name)
     temperature = math.floor(temperature)

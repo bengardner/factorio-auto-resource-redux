@@ -107,6 +107,7 @@ end
 local function manage_entity(entity, immediately_handle)
   local queue_key = EntityGroups.names_to_groups[entity.name]
   if queue_key == nil then
+    log(("manage_entity: not managing name=%s type=%s"):format(entity.name, entity.type))
     return
   end
 
@@ -243,6 +244,7 @@ function EntityManager.on_entity_created(event)
     return
   end
   if global.forces[entity.force.name] == nil then
+    log(("on_entity: no force for %s"):format(entity.name))
     return
   end
   local queue_key = manage_entity(entity, true)
@@ -254,6 +256,7 @@ function EntityManager.on_entity_created(event)
 
   -- place invisible chest to catch outputs for things like mining drills
   if entity.drop_position ~= nil and entity.drop_target == nil then
+    log(("Creating hidden chest @ %s for %s @ %s"):format(serpent.line(entity.drop_position), entity.name, serpent.line(entity.position)))
     local chest = entity.surface.create_entity({
       name = "arr-hidden-sink-chest",
       position = entity.drop_position,
@@ -264,6 +267,7 @@ function EntityManager.on_entity_created(event)
     if chest then
       chest.destructible = false
       global.sink_chest_parents[entity.unit_number] = chest.unit_number
+      global.entities[chest.unit_number] = chest
     end
   end
 end
@@ -282,6 +286,7 @@ function EntityManager.on_entity_removed(event, died)
   global.entities[entity.unit_number] = nil
   local attached_chest = global.entities[global.sink_chest_parents[entity.unit_number]]
   if attached_chest ~= nil and attached_chest.valid then
+    log("removing attached chest")
     if not died then
       EntityHandlers.handle_sink_chest(
         {
@@ -292,6 +297,7 @@ function EntityManager.on_entity_removed(event, died)
         true
       )
     end
+    global.entities[attached_chest.unit_number] = nil
     attached_chest.destroy({ raise_destroy = true })
   end
 end

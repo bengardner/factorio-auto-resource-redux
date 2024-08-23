@@ -96,6 +96,17 @@ script.on_event(defines.events.on_post_entity_died, EntityManager.on_post_entity
 
 script.on_event(defines.events.on_marked_for_upgrade, EntityManager.on_marked_for_upgrade)
 
+local function on_runtime_mod_setting_changed(event)
+  Storage.on_runtime_mod_setting_changed(event)
+end
+script.on_event(defines.events.on_runtime_mod_setting_changed, on_runtime_mod_setting_changed)
+
+local function on_player_dropped_item(event)
+  log(serpent.line(event))
+end
+script.on_event(defines.events.on_player_dropped_item, on_player_dropped_item)
+
+
 -- custom
 remote.add_interface("auto-resource-redux", {
   on_entity_replaced = EntityManager.on_entity_replaced,
