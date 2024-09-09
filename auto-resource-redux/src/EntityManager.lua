@@ -255,7 +255,11 @@ function EntityManager.on_entity_created(event)
   end
 
   -- place invisible chest to catch outputs for things like mining drills
-  if entity.drop_position ~= nil and entity.drop_target == nil then
+  if entity.type ~= "inserter"
+  and entity.type ~= "entity-ghost"
+  and entity.drop_position ~= nil
+  and entity.drop_target == nil
+  then
     log(("Creating hidden chest @ %s for %s @ %s"):format(serpent.line(entity.drop_position), entity.name, serpent.line(entity.position)))
     local chest = entity.surface.create_entity({
       name = "arr-hidden-sink-chest",
@@ -284,21 +288,26 @@ function EntityManager.on_entity_removed(event, died)
     EntityHandlers.store_all_fluids(entity)
   end
   global.entities[entity.unit_number] = nil
-  local attached_chest = global.entities[global.sink_chest_parents[entity.unit_number]]
-  if attached_chest ~= nil and attached_chest.valid then
-    log("removing attached chest")
-    if not died then
-      EntityHandlers.handle_sink_chest(
-        {
-          entity = attached_chest,
-          storage = Storage.get_storage(attached_chest),
-          use_reserved = false,
-        },
-        true
-      )
+  local attached_chest_unum = global.sink_chest_parents[entity.unit_number]
+  if attached_chest_unum ~= nil then
+    global.sink_chest_parents[entity.unit_number] = nil
+    local attached_chest = global.entities[attached_chest_unum]
+    if attached_chest ~= nil and attached_chest.valid then
+      log(("removing attached chest %s"):format(attached_chest.unit_number))
+      if not died then
+        -- force-dump the inventory into the global store
+        EntityHandlers.handle_sink_chest(
+          {
+            entity = attached_chest,
+            storage = Storage.get_storage(attached_chest),
+            use_reserved = false,
+          },
+          true
+        )
+      end
+      attached_chest.destroy({ raise_destroy = true })
     end
-    global.entities[attached_chest.unit_number] = nil
-    attached_chest.destroy({ raise_destroy = true })
+    global.entities[attached_chest_unum] = nil
   end
 end
 
